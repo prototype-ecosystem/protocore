@@ -1,0 +1,48 @@
+[package]
+name = "protocore-state-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "State synchronization protocol for Proto Core blockchain - fast sync via snapshots"
+
+[dependencies]
+# Internal crates
+protocore-types = { workspace = true }
+protocore-storage = { workspace = true }
+protocore-consensus = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+hex = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Cryptography
+sha3 = { workspace = true }
+
+# Utilities
+parking_lot = { workspace = true }
+bytes = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+rand = { workspace = true }
+tempfile = "3.10"
+
+[features]
+default = []
+# Enable additional testing utilities
+test-utils = []

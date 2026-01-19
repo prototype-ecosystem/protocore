@@ -1,0 +1,42 @@
+[package]
+name = "protocore-types"
+version = "0.1.0"
+edition = "2021"
+description = "Core types for the Proto Core blockchain"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/prototype-network/proto-core"
+keywords = ["blockchain", "ethereum", "evm", "types"]
+categories = ["cryptography", "data-structures"]
+
+[dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Hex encoding/decoding
+hex = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "1.0"
+
+# Cryptographic hashing (Keccak256)
+sha3 = "0.10"
+
+# RLP encoding/decoding
+rlp = "0.5"
+
+# Ethereum primitive types
+alloy-primitives = { version = "0.8", features = ["serde", "rlp"] }
+
+# Byte utilities
+bytes = "1.5"
+
+# Signature recovery (secp256k1)
+k256 = { version = "0.13", features = ["ecdsa", "ecdsa-core"] }
+
+[dev-dependencies]
+rand = "0.8"
+
+[features]
+default = []
+test-utils = []

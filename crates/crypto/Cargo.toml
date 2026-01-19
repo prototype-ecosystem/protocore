@@ -1,0 +1,49 @@
+[package]
+name = "protocore-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cryptographic primitives for Proto Core blockchain"
+
+[dependencies]
+# ECDSA (secp256k1)
+k256 = { workspace = true, features = ["ecdsa", "sha256", "ecdsa-core"] }
+
+# Keccak256 hashing
+sha3 = { workspace = true }
+
+# SHA-512 hashing (for VRF)
+sha2 = "0.10"
+
+# BLS12-381 signatures
+blst = { workspace = true }
+
+# Curve25519 (for VRF)
+curve25519-dalek = { version = "4", features = ["digest"] }
+
+# Random number generation
+rand = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+
+# Hex encoding/decoding
+hex = { workspace = true }
+
+# Byte utilities
+bytes = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
+serde_json = { workspace = true }
+bincode = "1.3"
+
+[features]
+default = []
+# Enable additional BLS features for batch verification
+batch-verify = []

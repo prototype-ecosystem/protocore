@@ -1,0 +1,67 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Test data
+/testnet/
+/data/
+*.key
+!*example*.key
+
+# Logs
+*.log
+logs/
+
+# Coverage
+*.profraw
+*.profdata
+coverage/
+tarpaulin-report.html
+
+# Documentation build
+/doc/
+
+# ============================================
+# INTERNAL FILES - NEVER COMMIT THESE
+# ============================================
+
+# Claude session files
+.claude-session-recovery.md
+.claude-*
+
+# Internal development documents
+specification.md
+change-of-plans.md
+additions.md
+additions/
+branding.md
+
+# Phase 2 development (unreleased features)
+phase2/
+
+# Internal notes and planning
+NOTES.md
+TODO.md
+PLANNING.md
+*.internal.md
+
+# Prototypes and experiments
+experiments/
+prototypes/
+scratch/

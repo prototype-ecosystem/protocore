@@ -1,0 +1,55 @@
+[package]
+name = "protocore-consensus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ProtoBFT consensus engine for Prototype Network blockchain"
+
+[dependencies]
+# Internal crates
+protocore-types = { workspace = true }
+protocore-crypto = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Synchronization
+parking_lot = { workspace = true }
+
+# Cryptographic hashing (for randomness beacon)
+sha2 = "0.10"
+
+# Ed25519 signatures (for release attestation)
+ed25519-dalek = { version = "2.1", features = ["serde"] }
+
+# Utilities
+hex = { workspace = true }
+
+# Deterministic RNG for shuffling
+rand = { workspace = true }
+rand_chacha = "0.3"
+
+# EVM primitives (for U256)
+alloy-primitives = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+rand = { workspace = true }
+serde_json = { workspace = true }
+
+[features]
+default = []
+# Enable additional testing utilities
+test-utils = []

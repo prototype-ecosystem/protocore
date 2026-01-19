@@ -1,0 +1,96 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/protocore",
+    "crates/consensus",
+    "crates/evm",
+    "crates/p2p",
+    "crates/storage",
+    "crates/mempool",
+    "crates/rpc",
+    "crates/light-client",
+    "crates/state-sync",
+    # "crates/privacy",  # Deferred to phase2/
+    "crates/config",
+    "crates/types",
+    "crates/crypto",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/prototype-network/proto-core"
+
+[workspace.dependencies]
+# Internal crates
+protocore-types = { path = "crates/types" }
+protocore-crypto = { path = "crates/crypto" }
+protocore-config = { path = "crates/config" }
+protocore-storage = { path = "crates/storage" }
+protocore-consensus = { path = "crates/consensus" }
+protocore-evm = { path = "crates/evm" }
+protocore-p2p = { path = "crates/p2p" }
+protocore-mempool = { path = "crates/mempool" }
+protocore-rpc = { path = "crates/rpc" }
+protocore-light-client = { path = "crates/light-client" }
+protocore-state-sync = { path = "crates/state-sync" }
+# protocore-privacy = { path = "crates/privacy" }  # Deferred to phase2/
+protocore-cli = { path = "crates/cli" }
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+toml = "0.8"
+rlp = "0.5"
+
+# Cryptography
+k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
+sha3 = "0.10"
+blst = "0.3"
+rand = "0.8"
+
+# EVM
+revm = { version = "5.0", default-features = false, features = ["std", "serde"] }
+alloy-primitives = { version = "0.6", features = ["serde"] }
+
+# Networking
+libp2p = { version = "0.53", features = ["tcp", "noise", "yamux", "gossipsub", "kad", "identify", "tokio"] }
+
+# Storage
+rocksdb = "0.21"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+
+# RPC
+jsonrpsee = { version = "0.21", features = ["server", "client", "macros"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Metrics
+prometheus = "0.13"
+
+# Utilities
+hex = "0.4"
+thiserror = "1.0"
+anyhow = "1.0"
+parking_lot = "0.12"
+bytes = "1.5"
+once_cell = "1.19"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

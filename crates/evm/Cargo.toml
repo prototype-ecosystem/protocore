@@ -1,0 +1,59 @@
+[package]
+name = "protocore-evm"
+version = "0.1.0"
+edition = "2021"
+description = "EVM executor and precompiles for Proto Core blockchain"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/prototype-network/proto-core"
+keywords = ["blockchain", "ethereum", "evm", "execution"]
+categories = ["cryptography", "compilers"]
+
+[dependencies]
+# EVM execution engine
+revm = { version = "18.0", default-features = true, features = ["serde"] }
+
+# Ethereum primitive types
+alloy-primitives = { version = "0.8", features = ["serde", "rlp"] }
+
+# Derive more for error handling and display
+derive_more = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+
+# Error handling
+thiserror = "1.0"
+
+# Logging and tracing
+tracing = "0.1"
+
+# Local dependencies
+protocore-types = { path = "../types" }
+protocore-storage = { path = "../storage" }
+
+# Byte handling
+bytes = "1.5"
+
+# Cryptographic hashing
+sha3 = "0.10"
+
+# Hex encoding for addresses and data
+hex = "0.4"
+
+# Parking lot for synchronization primitives
+parking_lot = "0.12"
+
+# Parallel execution
+rayon = "1.10"
+
+# CPU info for default thread count
+num_cpus = "1.16"
+
+[dev-dependencies]
+tempfile = "3.10"
+rand = "0.8"
+k256 = { version = "0.13", features = ["ecdsa"] }
+
+[features]
+default = []
+test-utils = []

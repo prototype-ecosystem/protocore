@@ -1,0 +1,29 @@
+[package]
+name = "protocore-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Configuration and genesis handling for Proto Core"
+
+[dependencies]
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Primitives (for Address, Hash types)
+alloy-primitives = { workspace = true }
+
+# Utilities
+hex = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.10"

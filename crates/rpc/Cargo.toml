@@ -1,0 +1,55 @@
+[package]
+name = "protocore-rpc"
+version = "0.1.0"
+edition = "2021"
+description = "JSON-RPC API for the Proto Core blockchain"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/prototype-network/proto-core"
+keywords = ["blockchain", "ethereum", "evm", "rpc", "jsonrpc"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+# Local dependencies
+protocore-types = { path = "../types" }
+
+# JSON-RPC
+jsonrpsee = { version = "0.24", features = ["server", "client", "macros"] }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full", "sync"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+# Logging and tracing
+tracing = "0.1"
+
+# Hex encoding
+hex = { version = "0.4", features = ["serde"] }
+
+# Futures utilities
+futures = "0.3"
+
+# Parking lot for efficient synchronization
+parking_lot = "0.12"
+
+# Async trait support
+async-trait = "0.1"
+
+# Ethereum types for compatibility
+alloy-primitives = { version = "0.8", features = ["serde"] }
+
+# RLP encoding for transaction decoding
+rlp = "0.5"
+
+[dev-dependencies]
+tokio-test = "0.4"
+pretty_assertions = "1.4"
+
+[features]
+default = []
+test-utils = []

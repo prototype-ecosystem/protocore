@@ -1,0 +1,39 @@
+[package]
+name = "protocore-mempool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Transaction mempool for Proto Core blockchain"
+keywords = ["blockchain", "mempool", "transactions"]
+categories = ["cryptography", "data-structures"]
+
+[dependencies]
+# Internal crates
+protocore-types = { path = "../types" }
+protocore-crypto = { path = "../crypto" }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging and tracing
+tracing = { workspace = true }
+
+# Synchronization primitives
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+rand = { workspace = true }
+
+[features]
+default = []
+# Enable test utilities
+test-utils = []

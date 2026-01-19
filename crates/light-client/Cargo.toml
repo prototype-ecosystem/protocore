@@ -1,0 +1,48 @@
+[package]
+name = "protocore-light-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Light client for Proto Core blockchain - verifies chain state with minimal trust"
+
+[dependencies]
+# Internal crates
+protocore-types = { workspace = true }
+protocore-crypto = { workspace = true }
+protocore-consensus = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+
+# Cryptographic hashing (Keccak256)
+sha3 = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Synchronization
+parking_lot = { workspace = true }
+
+# Utilities
+hex = { workspace = true }
+bytes = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
+rand = { workspace = true }
+
+[features]
+default = []
+# Enable test utilities for integration testing
+test-utils = []
