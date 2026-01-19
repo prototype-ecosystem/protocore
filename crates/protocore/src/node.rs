@@ -728,9 +728,11 @@ impl Node {
     pub async fn run(&mut self) -> Result<()> {
         info!("Starting Proto Core node");
 
-        // Create shutdown channel
-        let (shutdown_tx, _) = broadcast::channel(1);
-        self.shutdown_tx = Some(shutdown_tx.clone());
+        // Create shutdown channel if not already created (e.g., by start_network_early)
+        if self.shutdown_tx.is_none() {
+            let (shutdown_tx, _) = broadcast::channel(1);
+            self.shutdown_tx = Some(shutdown_tx);
+        }
 
         // Update status
         self.set_status(NodeStatus::Starting);
@@ -774,6 +776,11 @@ impl Node {
         if self.network_handle.is_some() {
             // Network already started
             return Ok(());
+        }
+        // Initialize shutdown channel if not already done
+        if self.shutdown_tx.is_none() {
+            let (shutdown_tx, _) = broadcast::channel(1);
+            self.shutdown_tx = Some(shutdown_tx);
         }
         self.start_network().await
     }
