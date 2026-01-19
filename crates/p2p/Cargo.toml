@@ -11,6 +11,7 @@ categories = ["network-programming", "cryptography"]
 [dependencies]
 # Internal dependencies
 protocore-types = { path = "../types" }
+protocore-consensus = { path = "../consensus" }
 
 # libp2p with required features
 libp2p = { version = "0.54", features = [

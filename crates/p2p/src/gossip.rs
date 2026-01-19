@@ -8,6 +8,26 @@
 use libp2p::gossipsub::IdentTopic;
 use serde::{Deserialize, Serialize};
 
+// Re-export consensus types for use in GossipMessage
+pub use protocore_consensus::{
+    FinalityCert, Proposal, Vote,
+};
+
+/// New view message for view change protocol
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewView {
+    /// New view number
+    pub view: u64,
+    /// Height
+    pub height: u64,
+    /// Validator index
+    pub validator_index: u64,
+    /// Highest locked block (if any)
+    pub locked_block: Option<[u8; 32]>,
+    /// Signature
+    pub signature: Vec<u8>,
+}
+
 /// Gossipsub topic names for Protocore
 pub mod topics {
     /// Topic for consensus messages (proposals, votes, finality certificates)
@@ -87,78 +107,7 @@ pub enum MessageType {
     TransactionRequest,
 }
 
-/// Proposal message for consensus
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Proposal {
-    /// Block height
-    pub height: u64,
-    /// View number
-    pub view: u64,
-    /// Proposer's validator index
-    pub proposer: u64,
-    /// Block hash being proposed
-    pub block_hash: [u8; 32],
-    /// Parent block hash
-    pub parent_hash: [u8; 32],
-    /// Serialized block data
-    pub block_data: Vec<u8>,
-    /// BLS signature from proposer
-    pub signature: Vec<u8>,
-}
-
-/// Vote message for consensus
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Vote {
-    /// Block height
-    pub height: u64,
-    /// View number
-    pub view: u64,
-    /// Voter's validator index
-    pub validator_index: u64,
-    /// Block hash being voted on
-    pub block_hash: [u8; 32],
-    /// Vote type (prevote or precommit)
-    pub vote_type: VoteType,
-    /// BLS signature
-    pub signature: Vec<u8>,
-}
-
-/// Type of vote
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum VoteType {
-    /// First round vote
-    Prevote,
-    /// Second round vote (after seeing prevotes)
-    Precommit,
-}
-
-/// Finality certificate proving block finalization
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FinalityCert {
-    /// Block height
-    pub height: u64,
-    /// Block hash
-    pub block_hash: [u8; 32],
-    /// Aggregated BLS signature
-    pub aggregate_signature: Vec<u8>,
-    /// Bitmap of validators who signed
-    pub signers_bitmap: Vec<u8>,
-}
-
-/// New view message for view change
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NewView {
-    /// New view number
-    pub view: u64,
-    /// Height
-    pub height: u64,
-    /// Validator index
-    pub validator_index: u64,
-    /// Highest locked block (if any)
-    pub locked_block: Option<[u8; 32]>,
-    /// Signature
-    pub signature: Vec<u8>,
-}
+// Note: Proposal, Vote, FinalityCert, and NewView are now re-exported from protocore-consensus
 
 /// Block announcement message
 #[derive(Debug, Clone, Serialize, Deserialize)]

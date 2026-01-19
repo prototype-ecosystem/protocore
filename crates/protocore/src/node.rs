@@ -26,7 +26,7 @@ use protocore_config::Config;
 use protocore_consensus::{BlockBuilder, BlockValidator, ConsensusEngine};
 use protocore_crypto::Hash as CryptoHash;
 use protocore_mempool::{AccountStateProvider, Mempool, MempoolConfig};
-use protocore_p2p::{NetworkConfig, NetworkEvent, NetworkHandle, NetworkService};
+use protocore_p2p::{GossipMessage, NetworkConfig, NetworkEvent, NetworkHandle, NetworkService};
 use protocore_rpc::{
     BlockNumberOrTag, CallRequest, EpochInfo, FeeHistory, FinalityCert, GovernanceProposal,
     HexU256, HexU64, LogFilter, NetworkStats, ProposalStatus, ProtocoreStateProvider, RpcBlock,
@@ -440,6 +440,9 @@ pub struct Node {
     /// Consensus engine (non-voting for full nodes)
     consensus: Option<Arc<RwLock<ConsensusEngine<NodeBlockValidator, NodeBlockBuilder>>>>,
 
+    /// Channel to forward consensus messages to validator (if set)
+    consensus_msg_tx: Option<mpsc::Sender<GossipMessage>>,
+
     /// Event broadcaster for node events
     event_tx: broadcast::Sender<NodeEvent>,
 
@@ -599,6 +602,13 @@ pub struct NodeBlockBuilder {
     gas_limit: u64,
 }
 
+impl NodeBlockBuilder {
+    /// Create a new block builder
+    pub fn new(mempool: Arc<Mempool<StateDBAdapter>>, gas_limit: u64) -> Self {
+        Self { mempool, gas_limit }
+    }
+}
+
 #[async_trait::async_trait]
 impl BlockBuilder for NodeBlockBuilder {
     async fn build_block(&self, height: u64, parent_hash: CryptoHash) -> Block {
@@ -658,6 +668,7 @@ impl Node {
             mempool,
             network_handle: None,
             consensus: None,
+            consensus_msg_tx: None,
             event_tx,
             shutdown_tx: None,
             handles: ComponentHandles::default(),
@@ -679,6 +690,36 @@ impl Node {
         };
 
         Database::open(db_config).map_err(|e| anyhow::anyhow!("Failed to open database: {}", e))
+    }
+
+    /// Set the consensus message channel for forwarding consensus messages to the validator
+    pub fn set_consensus_channel(&mut self, tx: mpsc::Sender<GossipMessage>) {
+        self.consensus_msg_tx = Some(tx);
+    }
+
+    /// Get a reference to the network handle
+    pub fn network_handle(&self) -> Option<&NetworkHandle> {
+        self.network_handle.as_ref()
+    }
+
+    /// Get a reference to the database
+    pub fn database(&self) -> &Arc<Database> {
+        &self.database
+    }
+
+    /// Get a reference to the state database
+    pub fn state_db(&self) -> &Arc<StateDB> {
+        &self.state_db
+    }
+
+    /// Get a reference to the mempool
+    pub fn mempool(&self) -> &Arc<Mempool<StateDBAdapter>> {
+        &self.mempool
+    }
+
+    /// Get the config
+    pub fn config(&self) -> &Config {
+        &self.config
     }
 
     /// Run the node - this is the main entry point
@@ -779,6 +820,7 @@ impl Node {
         let state_db = Arc::clone(&self.state_db);
         let mempool = Arc::clone(&self.mempool);
         let node_event_tx = self.event_tx.clone();
+        let consensus_tx = self.consensus_msg_tx.clone();
         let mut shutdown_rx = self.shutdown_tx.as_ref().unwrap().subscribe();
 
         // Spawn network event handler
@@ -792,6 +834,7 @@ impl Node {
                             &state_db,
                             &mempool,
                             &node_event_tx,
+                            &consensus_tx,
                         ).await {
                             warn!(error = %e, "Error handling network event");
                         }
@@ -827,6 +870,7 @@ impl Node {
         _state_db: &Arc<StateDB>,
         _mempool: &Arc<Mempool<StateDBAdapter>>,
         event_tx: &broadcast::Sender<NodeEvent>,
+        consensus_tx: &Option<mpsc::Sender<GossipMessage>>,
     ) -> Result<()> {
         match event {
             NetworkEvent::NewBlock { source, message: _ } => {
@@ -854,9 +898,14 @@ impl Node {
                     peer_id: peer_id.to_string(),
                 });
             }
-            NetworkEvent::ConsensusMessage { source, message: _ } => {
+            NetworkEvent::ConsensusMessage { source, message } => {
                 debug!(source = %source, "Received consensus message");
                 // Forward to consensus engine if we're a validator
+                if let Some(tx) = consensus_tx {
+                    if let Err(e) = tx.send(message).await {
+                        warn!(error = %e, "Failed to forward consensus message");
+                    }
+                }
             }
             NetworkEvent::DiscoveryComplete => {
                 debug!("Peer discovery completed");
@@ -1254,26 +1303,6 @@ impl Node {
         if let Some(ref shutdown_tx) = self.shutdown_tx {
             let _ = shutdown_tx.send(());
         }
-    }
-
-    /// Get a reference to the database
-    pub fn database(&self) -> &Arc<Database> {
-        &self.database
-    }
-
-    /// Get a reference to the state database
-    pub fn state_db(&self) -> &Arc<StateDB> {
-        &self.state_db
-    }
-
-    /// Get a reference to the mempool
-    pub fn mempool(&self) -> &Arc<Mempool<StateDBAdapter>> {
-        &self.mempool
-    }
-
-    /// Get the network handle
-    pub fn network_handle(&self) -> Option<&NetworkHandle> {
-        self.network_handle.as_ref()
     }
 }
 

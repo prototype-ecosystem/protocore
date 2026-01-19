@@ -20,13 +20,15 @@ use protocore_config::Config;
 use protocore_consensus::{
     BlockBuilder as ConsensusBlockBuilder, BlockValidator as ConsensusBlockValidator,
     CommittedBlock, ConsensusEngine, ConsensusMessage, FinalityCert, Proposal, TimeoutConfig,
-    ValidatorSet as ConsensusValidatorSet, Vote, VoteType,
+    TimeoutInfo, Validator as ConsensusValidator, ValidatorSet as ConsensusValidatorSet,
+    Vote, VoteType,
 };
 use protocore_crypto::{BlsPrivateKey, BlsPublicKey, BlsSignature};
+use protocore_p2p::{GossipMessage, NetworkHandle};
 use protocore_storage::{Database, StateDB};
 use protocore_types::{Address, Block, BlockHeader, H256};
 
-use crate::node::{Node, NodeEvent, NodeStatus};
+use crate::node::{Node, NodeBlockBuilder, NodeBlockValidator, NodeEvent, NodeStatus};
 
 /// Validator key pair for consensus participation
 #[derive(Clone)]
@@ -140,6 +142,17 @@ pub struct ValidatorNode {
 
     /// Channel for committed blocks
     committed_tx: broadcast::Sender<CommittedBlock>,
+
+    /// Consensus engine (active when validator is in the set)
+    consensus: Option<Arc<ConsensusEngine<NodeBlockValidator, NodeBlockBuilder>>>,
+
+    /// Channel receivers for consensus tasks
+    consensus_msg_rx: Option<mpsc::Receiver<GossipMessage>>,
+    timeout_rx: Option<mpsc::Receiver<TimeoutInfo>>,
+    commit_rx: Option<mpsc::Receiver<CommittedBlock>>,
+
+    /// Sender for outbound consensus messages to network
+    network_msg_rx: Option<mpsc::Receiver<ConsensusMessage>>,
 }
 
 impl ValidatorNode {
@@ -172,6 +185,11 @@ impl ValidatorNode {
             blocks_proposed: 0,
             blocks_voted: 0,
             committed_tx,
+            consensus: None,
+            consensus_msg_rx: None,
+            timeout_rx: None,
+            commit_rx: None,
+            network_msg_rx: None,
         })
     }
 
@@ -191,6 +209,27 @@ impl ValidatorNode {
                 validator_id = self.validator_id,
                 "Validator is active in the validator set"
             );
+
+            // Set up consensus message channel on the node
+            let (consensus_tx, consensus_rx) = mpsc::channel(1000);
+            self.node.set_consensus_channel(consensus_tx);
+            self.consensus_msg_rx = Some(consensus_rx);
+
+            // Initialize the consensus engine
+            self.init_consensus_engine().await?;
+
+            // Get current chain tip
+            let (height, parent_hash) = self.get_chain_tip()?;
+            info!(height = height, "Starting consensus from chain tip");
+
+            // Spawn consensus background tasks
+            self.spawn_consensus_tasks();
+
+            // Start consensus at the next height
+            if let Some(engine) = &self.consensus {
+                info!(height = height + 1, "Starting consensus");
+                engine.start(height + 1, parent_hash).await;
+            }
         }
 
         // Run the base node (this blocks until shutdown)
@@ -236,6 +275,218 @@ impl ValidatorNode {
         );
 
         Ok(())
+    }
+
+    /// Initialize the consensus engine with channels and validator set
+    async fn init_consensus_engine(&mut self) -> Result<()> {
+        info!("Initializing consensus engine");
+
+        // Build validator set from genesis config
+        let mut validators = Vec::new();
+        for (i, genesis_val) in self.config.genesis.validators.iter().enumerate() {
+            // Parse BLS public key
+            let pubkey_bytes = hex::decode(genesis_val.pubkey.trim_start_matches("0x"))
+                .context("Invalid BLS public key hex")?;
+            let pubkey_array: [u8; 48] = pubkey_bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("BLS public key must be 48 bytes"))?;
+            let pubkey = BlsPublicKey::from_bytes(&pubkey_array)
+                .map_err(|e| anyhow::anyhow!("Invalid BLS public key: {}", e))?;
+
+            // Parse address
+            let address_bytes = hex::decode(genesis_val.address.trim_start_matches("0x"))
+                .context("Invalid address hex")?;
+            let mut address = [0u8; 20];
+            address.copy_from_slice(&address_bytes);
+
+            // Parse stake from string to u128
+            let stake: u128 = genesis_val.stake.parse()
+                .context("Invalid stake value")?;
+
+            validators.push(ConsensusValidator::new(
+                i as u64,
+                pubkey,
+                address,
+                stake,
+                genesis_val.commission,
+            ));
+        }
+        let validator_set = ConsensusValidatorSet::new(validators);
+
+        info!(
+            validator_count = validator_set.len(),
+            our_id = self.validator_id,
+            "Built validator set from genesis"
+        );
+
+        // Create channels for consensus
+        let (network_tx, network_rx) = mpsc::channel(100);
+        let (commit_tx, commit_rx) = mpsc::channel(100);
+        let (timeout_tx, timeout_rx) = mpsc::channel(100);
+
+        // Store receivers for spawned tasks
+        self.network_msg_rx = Some(network_rx);
+        self.commit_rx = Some(commit_rx);
+        self.timeout_rx = Some(timeout_rx);
+
+        // Create block validator and builder
+        let block_validator = Arc::new(NodeBlockValidator::new(
+            Arc::clone(self.node.state_db()),
+            Arc::clone(self.node.database()),
+            self.config.chain.chain_id,
+        ));
+        let block_builder = Arc::new(NodeBlockBuilder::new(
+            Arc::clone(self.node.mempool()),
+            self.config.economics.block_gas_limit,
+        ));
+
+        // Create the consensus engine
+        let engine = ConsensusEngine::new(
+            self.validator_id.unwrap(),
+            self.keys.bls_private_key.clone(),
+            validator_set,
+            TimeoutConfig::default(),
+            block_validator,
+            block_builder,
+            network_tx,
+            commit_tx,
+            timeout_tx,
+        );
+
+        self.consensus = Some(Arc::new(engine));
+        info!("Consensus engine initialized");
+
+        Ok(())
+    }
+
+    /// Get the current chain tip (height and hash)
+    fn get_chain_tip(&self) -> Result<(u64, [u8; 32])> {
+        // Get latest height from metadata
+        let database = self.node.database();
+
+        // Try to get the latest block height from metadata
+        if let Some(height_bytes) = database.get_metadata(b"latest_height")
+            .map_err(|e| anyhow::anyhow!("Failed to get latest height: {}", e))?
+        {
+            if height_bytes.len() >= 8 {
+                let height = u64::from_le_bytes(height_bytes[..8].try_into().unwrap());
+                // Try to get the block hash for this height
+                if let Some(hash_bytes) = database.get_metadata(&format!("block_hash_{}", height).into_bytes())
+                    .map_err(|e| anyhow::anyhow!("Failed to get block hash: {}", e))?
+                {
+                    if hash_bytes.len() >= 32 {
+                        let mut hash = [0u8; 32];
+                        hash.copy_from_slice(&hash_bytes[..32]);
+                        return Ok((height, hash));
+                    }
+                }
+            }
+        }
+
+        // No blocks yet, return genesis (height 0, zero hash for parent)
+        // The first block at height 1 will have parent_hash = zero
+        Ok((0, [0u8; 32]))
+    }
+
+    /// Spawn background tasks for consensus message handling
+    fn spawn_consensus_tasks(&mut self) {
+        let engine = self.consensus.clone().expect("Consensus engine must be initialized");
+
+        // Task 1: Handle incoming consensus messages from network
+        if let Some(mut rx) = self.consensus_msg_rx.take() {
+            let eng = engine.clone();
+            tokio::spawn(async move {
+                while let Some(msg) = rx.recv().await {
+                    match msg {
+                        GossipMessage::Proposal(proposal) => {
+                            debug!(height = proposal.height, round = proposal.round, "Processing proposal");
+                            eng.on_proposal(proposal).await;
+                        }
+                        GossipMessage::Vote(vote) => {
+                            debug!(height = vote.height, round = vote.round, "Processing vote");
+                            eng.on_vote(vote).await;
+                        }
+                        _ => {
+                            // Ignore non-consensus messages
+                        }
+                    }
+                }
+                info!("Consensus message handler exiting");
+            });
+        }
+
+        // Task 2: Handle timeout events
+        if let Some(mut rx) = self.timeout_rx.take() {
+            let eng = engine.clone();
+            tokio::spawn(async move {
+                while let Some(timeout) = rx.recv().await {
+                    debug!(
+                        height = timeout.height,
+                        round = timeout.round,
+                        step = ?timeout.step,
+                        "Processing timeout"
+                    );
+                    eng.on_timeout(timeout).await;
+                }
+                info!("Timeout handler exiting");
+            });
+        }
+
+        // Task 3: Handle committed blocks
+        if let Some(mut rx) = self.commit_rx.take() {
+            let committed_tx = self.committed_tx.clone();
+            let eng = engine.clone();
+            tokio::spawn(async move {
+                while let Some(committed) = rx.recv().await {
+                    let height = committed.block.header.height;
+                    let hash = committed.block.hash();
+                    info!(
+                        height = height,
+                        hash = %hex::encode(&hash.as_bytes()[..8]),
+                        "Block committed"
+                    );
+
+                    // Broadcast committed block event
+                    let _ = committed_tx.send(committed.clone());
+
+                    // Start next height consensus
+                    let parent_hash: [u8; 32] = hash.into();
+                    eng.start(height + 1, parent_hash).await;
+                }
+                info!("Commit handler exiting");
+            });
+        }
+
+        // Task 4: Forward outbound consensus messages to network
+        if let Some(mut rx) = self.network_msg_rx.take() {
+            // Clone the network handle if available
+            let network_handle = self.node.network_handle().cloned();
+            tokio::spawn(async move {
+                while let Some(msg) = rx.recv().await {
+                    let gossip_msg = match msg {
+                        ConsensusMessage::Proposal(p) => {
+                            debug!(height = p.height, round = p.round, "Broadcasting proposal");
+                            GossipMessage::Proposal(p)
+                        }
+                        ConsensusMessage::Vote(v) => {
+                            debug!(height = v.height, round = v.round, "Broadcasting vote");
+                            GossipMessage::Vote(v)
+                        }
+                    };
+
+                    if let Some(ref handle) = network_handle {
+                        if let Err(e) = handle.broadcast(gossip_msg).await {
+                            warn!(error = %e, "Failed to broadcast consensus message");
+                        }
+                    } else {
+                        warn!("Network handle not available, cannot broadcast");
+                    }
+                }
+                info!("Network sender exiting");
+            });
+        }
+
+        info!("Consensus tasks spawned");
     }
 
     /// Handle incoming consensus messages from the network

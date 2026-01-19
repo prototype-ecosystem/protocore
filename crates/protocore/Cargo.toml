@@ -64,6 +64,12 @@ revm = { version = "18.0", default-features = true, features = ["serde"] }
 [dev-dependencies]
 tempfile = "3.10"
 rand = { workspace = true }
+protocore-crypto = { workspace = true }
+protocore-consensus = { workspace = true }
+protocore-config = { workspace = true }
+protocore-types = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
 
 [features]
 default = []
