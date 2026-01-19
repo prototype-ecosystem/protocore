@@ -442,6 +442,7 @@ impl ValidatorNode {
         if let Some(mut rx) = self.commit_rx.take() {
             let committed_tx = self.committed_tx.clone();
             let eng = engine.clone();
+            let database = Arc::clone(self.node.database());
             tokio::spawn(async move {
                 while let Some(committed) = rx.recv().await {
                     let height = committed.block.header.height;
@@ -451,6 +452,25 @@ impl ValidatorNode {
                         hash = %hex::encode(&hash.as_bytes()[..8]),
                         "Block committed"
                     );
+
+                    // Persist the committed block to database
+                    let encoded = committed.block.rlp_encode();
+                    if let Err(e) = database.put_block(hash.as_bytes(), &encoded) {
+                        error!(error = %e, "Failed to persist committed block");
+                    }
+
+                    // Update latest height metadata
+                    if let Err(e) = database.put_metadata(b"latest_height", &height.to_le_bytes()) {
+                        error!(error = %e, "Failed to update latest height");
+                    }
+
+                    // Store block hash by height for lookups
+                    let height_key = format!("block_hash_{}", height);
+                    if let Err(e) = database.put_metadata(height_key.as_bytes(), hash.as_bytes()) {
+                        error!(error = %e, "Failed to store block hash mapping");
+                    }
+
+                    info!(height = height, "Block persisted to database");
 
                     // Broadcast committed block event
                     let _ = committed_tx.send(committed.clone());
