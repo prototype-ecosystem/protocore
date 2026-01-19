@@ -599,13 +599,27 @@ impl BlockValidator for NodeBlockValidator {
 /// Block builder implementation for the node
 pub struct NodeBlockBuilder {
     mempool: Arc<Mempool<StateDBAdapter>>,
+    database: Arc<Database>,
+    chain_id: u64,
     gas_limit: u64,
 }
 
 impl NodeBlockBuilder {
     /// Create a new block builder
-    pub fn new(mempool: Arc<Mempool<StateDBAdapter>>, gas_limit: u64) -> Self {
-        Self { mempool, gas_limit }
+    pub fn new(
+        mempool: Arc<Mempool<StateDBAdapter>>,
+        database: Arc<Database>,
+        chain_id: u64,
+        gas_limit: u64,
+    ) -> Self {
+        Self { mempool, database, chain_id, gas_limit }
+    }
+
+    /// Get parent header from database
+    fn get_parent_header(&self, parent_hash: &[u8; 32]) -> Option<BlockHeader> {
+        let block_bytes = self.database.get_block(parent_hash).ok()??;
+        let block = Block::rlp_decode(&block_bytes).ok()?;
+        Some(block.header)
     }
 }
 
@@ -615,11 +629,31 @@ impl BlockBuilder for NodeBlockBuilder {
         // Get pending transactions from mempool
         let txs = self.mempool.get_pending_transactions(self.gas_limit);
 
+        // Get current timestamp
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        // Get parent header for base fee calculation
+        let (gas_limit, base_fee) = self.get_parent_header(&parent_hash)
+            .map(|parent| (parent.gas_limit, parent.next_base_fee()))
+            .unwrap_or((self.gas_limit, 1_000_000_000));
+
         Block {
             header: BlockHeader {
+                chain_id: self.chain_id,
                 height,
+                timestamp,
                 parent_hash: H256::new(parent_hash),
-                ..Default::default()
+                transactions_root: H256::NIL,
+                state_root: H256::NIL,
+                receipts_root: H256::NIL,
+                proposer: Address::ZERO, // Will be set by consensus
+                gas_limit,
+                gas_used: 0,
+                base_fee,
+                last_finality_cert_hash: None,
             },
             transactions: txs,
         }
@@ -710,10 +744,8 @@ impl Node {
         info!("Initializing genesis block");
 
         // Create genesis block header
-        let genesis_timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        // Use timestamp 0 for genesis (deterministic across all nodes)
+        let genesis_timestamp = 0u64;
 
         let header = BlockHeader {
             chain_id: config.chain.chain_id,
@@ -982,12 +1014,16 @@ impl Node {
                 });
             }
             NetworkEvent::ConsensusMessage { source, message } => {
-                debug!(source = %source, "Received consensus message");
+                info!(source = %source, msg_type = ?message.message_type(), "Received consensus message from network");
                 // Forward to consensus engine if we're a validator
                 if let Some(tx) = consensus_tx {
                     if let Err(e) = tx.send(message).await {
                         warn!(error = %e, "Failed to forward consensus message");
+                    } else {
+                        info!("Forwarded consensus message to engine");
                     }
+                } else {
+                    debug!("No consensus channel set, ignoring message");
                 }
             }
             NetworkEvent::DiscoveryComplete => {

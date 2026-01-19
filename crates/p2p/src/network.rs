@@ -510,6 +510,8 @@ impl NetworkService {
         message_id: gossipsub::MessageId,
         message: gossipsub::Message,
     ) {
+        info!(%source, topic = %message.topic, data_len = message.data.len(), "Received gossip message");
+
         // Decode the message
         let gossip_msg = match GossipMessage::decode(&message.data) {
             Ok(msg) => msg,
@@ -638,7 +640,11 @@ impl NetworkService {
     async fn handle_command(&mut self, command: Command) -> Result<bool> {
         match command {
             Command::Broadcast(message) => {
-                self.broadcast_message(message)?;
+                // Don't let broadcast failures crash the network service
+                // (e.g., if there are no peers to broadcast to)
+                if let Err(e) = self.broadcast_message(message) {
+                    debug!(error = %e, "Failed to broadcast message (non-fatal)");
+                }
             }
             Command::Connect(peer_id, addr) => {
                 self.dial_peer(peer_id, addr);
@@ -667,6 +673,13 @@ impl NetworkService {
     pub fn broadcast_message(&mut self, message: GossipMessage) -> Result<()> {
         let topic = message.topic(&self.topics);
         let data = message.encode()?;
+
+        info!(
+            topic = %topic,
+            data_len = data.len(),
+            msg_type = ?message.message_type(),
+            "Broadcasting gossip message"
+        );
 
         self.swarm
             .behaviour_mut()

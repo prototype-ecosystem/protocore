@@ -341,6 +341,8 @@ impl ValidatorNode {
         ));
         let block_builder = Arc::new(NodeBlockBuilder::new(
             Arc::clone(self.node.mempool()),
+            Arc::clone(self.node.database()),
+            self.config.chain.chain_id,
             self.config.economics.block_gas_limit,
         ));
 

@@ -77,13 +77,13 @@ impl ProtocoreBehaviour {
             // History parameters for message deduplication
             .history_length(12)
             .history_gossip(3)
-            // Mesh parameters
-            .mesh_n(8) // Target number of peers in mesh
-            .mesh_n_low(6) // Minimum peers in mesh
-            .mesh_n_high(12) // Maximum peers in mesh
-            .mesh_outbound_min(4) // Minimum outbound peers
+            // Mesh parameters (set low to work with small validator sets)
+            .mesh_n(2) // Target number of peers in mesh
+            .mesh_n_low(1) // Minimum peers in mesh
+            .mesh_n_high(6) // Maximum peers in mesh
+            .mesh_outbound_min(1) // Minimum outbound peers
             // Gossip parameters
-            .gossip_lazy(6) // Peers for lazy push
+            .gossip_lazy(2) // Peers for lazy push
             .gossip_factor(0.25) // Fraction of peers to gossip to
             // Flood publishing for important messages
             .flood_publish(true)
