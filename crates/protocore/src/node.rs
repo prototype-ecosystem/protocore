@@ -768,6 +768,16 @@ impl Node {
     }
 
     /// Start the P2P network service
+    /// Start the network early (before full run)
+    /// This allows consensus to get the network handle before the main loop starts
+    pub async fn start_network_early(&mut self) -> Result<()> {
+        if self.network_handle.is_some() {
+            // Network already started
+            return Ok(());
+        }
+        self.start_network().await
+    }
+
     async fn start_network(&mut self) -> Result<()> {
         info!(
             listen_addr = %self.config.network.listen_address,

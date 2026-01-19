@@ -215,6 +215,10 @@ impl ValidatorNode {
             self.node.set_consensus_channel(consensus_tx);
             self.consensus_msg_rx = Some(consensus_rx);
 
+            // Start network early so we can get the handle for consensus
+            info!("Starting network early for consensus");
+            self.node.start_network_early().await?;
+
             // Initialize the consensus engine
             self.init_consensus_engine().await?;
 
@@ -222,7 +226,7 @@ impl ValidatorNode {
             let (height, parent_hash) = self.get_chain_tip()?;
             info!(height = height, "Starting consensus from chain tip");
 
-            // Spawn consensus background tasks
+            // Spawn consensus background tasks (now network handle is available)
             self.spawn_consensus_tasks();
 
             // Start consensus at the next height
