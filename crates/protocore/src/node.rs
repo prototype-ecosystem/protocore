@@ -636,6 +636,10 @@ impl Node {
 
         // Initialize database
         let database = Self::init_database(&config)?;
+
+        // Initialize genesis block if this is first startup
+        Self::init_genesis(&database, &config)?;
+
         let database = Arc::new(database);
 
         // Initialize state database
@@ -690,6 +694,62 @@ impl Node {
         };
 
         Database::open(db_config).map_err(|e| anyhow::anyhow!("Failed to open database: {}", e))
+    }
+
+    /// Initialize genesis block if needed (first time startup)
+    fn init_genesis(database: &Database, config: &Config) -> Result<()> {
+        // Check if genesis already exists by looking for latest_height metadata
+        if database.get_metadata(b"latest_height")
+            .map_err(|e| anyhow::anyhow!("Failed to check metadata: {}", e))?
+            .is_some()
+        {
+            info!("Genesis block already exists, skipping initialization");
+            return Ok(());
+        }
+
+        info!("Initializing genesis block");
+
+        // Create genesis block header
+        let genesis_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let header = BlockHeader {
+            chain_id: config.chain.chain_id,
+            height: 0,
+            timestamp: genesis_timestamp,
+            parent_hash: H256::NIL,
+            transactions_root: H256::NIL,
+            state_root: H256::NIL,  // TODO: Compute from genesis accounts
+            receipts_root: H256::NIL,
+            proposer: Address::ZERO,
+            gas_limit: config.economics.block_gas_limit,
+            gas_used: 0,
+            base_fee: config.economics.min_base_fee.parse().unwrap_or(1_000_000_000),
+            last_finality_cert_hash: None,
+        };
+
+        let genesis_block = Block::new(header, Vec::new());
+        let genesis_hash = genesis_block.hash();
+
+        // Encode and store the genesis block
+        let encoded = genesis_block.rlp_encode();
+        database.put_block(genesis_hash.as_bytes(), &encoded)
+            .map_err(|e| anyhow::anyhow!("Failed to store genesis block: {}", e))?;
+
+        // Store metadata
+        database.put_metadata(b"latest_height", &0u64.to_le_bytes())
+            .map_err(|e| anyhow::anyhow!("Failed to store latest height: {}", e))?;
+        database.put_metadata(&format!("block_hash_0").into_bytes(), genesis_hash.as_bytes())
+            .map_err(|e| anyhow::anyhow!("Failed to store genesis hash: {}", e))?;
+
+        info!(
+            genesis_hash = %hex::encode(&genesis_hash.as_bytes()[..8]),
+            "Genesis block initialized"
+        );
+
+        Ok(())
     }
 
     /// Set the consensus message channel for forwarding consensus messages to the validator
@@ -786,6 +846,12 @@ impl Node {
     }
 
     async fn start_network(&mut self) -> Result<()> {
+        // Check if already started (e.g., by start_network_early)
+        if self.network_handle.is_some() {
+            debug!("Network already started, skipping");
+            return Ok(());
+        }
+
         info!(
             listen_addr = %self.config.network.listen_address,
             "Starting P2P network"
