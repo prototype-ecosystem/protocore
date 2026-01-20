@@ -235,33 +235,35 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         self.enter_round(height, 0).await;
     }
 
-    /// Enter a new round
-    pub async fn enter_round(&self, height: u64, round: u64) {
-        info!(height = height, round = round, "Entering round");
+    /// Enter a new round (boxed to allow recursive calls from on_proposal/on_vote)
+    pub fn enter_round(&self, height: u64, round: u64) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            info!(height = height, round = round, "Entering round");
 
-        // Update state
-        {
-            let mut state = self.state.write();
-            state.height = height;
-            state.round = round;
-            state.step = Step::Propose;
-        }
+            // Update state
+            {
+                let mut state = self.state.write();
+                state.height = height;
+                state.round = round;
+                state.step = Step::Propose;
+            }
 
-        // Update timeout scheduler
-        self.timeout_scheduler.set_height_round(height, round);
+            // Update timeout scheduler
+            self.timeout_scheduler.set_height_round(height, round);
 
-        // Check if we are the proposer
-        let is_proposer = {
-            let vs = self.validator_set.read();
-            vs.proposer_id(height, round) == self.validator_id
-        };
+            // Check if we are the proposer
+            let is_proposer = {
+                let vs = self.validator_set.read();
+                vs.proposer_id(height, round) == self.validator_id
+            };
 
-        if is_proposer {
-            self.do_propose().await;
-        } else {
-            // Schedule propose timeout
-            self.timeout_scheduler.schedule(Step::Propose, height, round);
-        }
+            if is_proposer {
+                self.do_propose().await;
+            } else {
+                // Schedule propose timeout
+                self.timeout_scheduler.schedule(Step::Propose, height, round);
+            }
+        })
     }
 
     /// Create and broadcast a proposal (when we are the proposer)
@@ -383,6 +385,20 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
 
         // Store proposal
         self.proposals.write().insert(proposal.round, proposal.clone());
+
+        // Round catch-up: if valid proposal is for a higher round, advance to it
+        if proposal.round > round {
+            info!(
+                height = height,
+                current_round = round,
+                proposal_round = proposal.round,
+                "Catching up to higher round from valid proposal"
+            );
+            self.enter_round(height, proposal.round).await;
+            // After entering the round, we're in Propose step, so process this proposal
+            self.process_proposal(&proposal).await;
+            return;
+        }
 
         // If this is for our current round and we're in propose step, process it
         if proposal.round == round && step == Step::Propose {
@@ -528,11 +544,31 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         if let Some(hash) = quorum_hash {
             match vote.vote_type {
                 VoteType::Prevote => {
-                    if vote.round == round {
+                    // Round catch-up: if quorum is for a higher round, advance to it
+                    if vote.round > round {
+                        info!(
+                            height = height,
+                            current_round = round,
+                            quorum_round = vote.round,
+                            "Catching up to higher round from prevote quorum"
+                        );
+                        self.enter_round(height, vote.round).await;
+                        self.on_prevote_quorum(hash).await;
+                    } else if vote.round == round {
                         self.on_prevote_quorum(hash).await;
                     }
                 }
                 VoteType::Precommit => {
+                    // Round catch-up for precommit quorum as well
+                    if vote.round > round {
+                        info!(
+                            height = height,
+                            current_round = round,
+                            quorum_round = vote.round,
+                            "Catching up to higher round from precommit quorum"
+                        );
+                        self.enter_round(height, vote.round).await;
+                    }
                     self.on_precommit_quorum(hash, vote.round).await;
                 }
             }
