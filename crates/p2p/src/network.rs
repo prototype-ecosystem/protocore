@@ -22,6 +22,7 @@ use libp2p::{
 };
 use std::{
     collections::{HashMap, HashSet},
+    path::PathBuf,
     time::Duration,
 };
 use tokio::sync::mpsc;
@@ -46,6 +47,8 @@ pub struct NetworkConfig {
     pub connection_timeout: Duration,
     /// Peer discovery configuration
     pub discovery: DiscoveryConfig,
+    /// Path to persist P2P identity keypair (if None, generates ephemeral key)
+    pub p2p_key_path: Option<PathBuf>,
 }
 
 impl Default for NetworkConfig {
@@ -59,6 +62,7 @@ impl Default for NetworkConfig {
             enable_nat_traversal: true,
             connection_timeout: Duration::from_secs(30),
             discovery: DiscoveryConfig::default(),
+            p2p_key_path: None,
         }
     }
 }
@@ -275,9 +279,52 @@ impl NetworkService {
         config: NetworkConfig,
         event_tx: mpsc::Sender<NetworkEvent>,
     ) -> Result<(Self, NetworkHandle)> {
-        // Generate keypair for this node
-        let keypair = libp2p::identity::Keypair::generate_ed25519();
+        // Load or generate keypair for this node
+        let keypair = Self::load_or_generate_keypair(&config.p2p_key_path)?;
         Self::with_keypair(keypair, config, event_tx).await
+    }
+
+    /// Load keypair from file if it exists, otherwise generate and save a new one
+    fn load_or_generate_keypair(key_path: &Option<PathBuf>) -> Result<libp2p::identity::Keypair> {
+        match key_path {
+            Some(path) => {
+                if path.exists() {
+                    // Load existing key from protobuf encoding
+                    let key_bytes = std::fs::read(path)
+                        .map_err(|e| Error::Config(format!("Failed to read P2P key file: {}", e)))?;
+                    let keypair = libp2p::identity::Keypair::from_protobuf_encoding(&key_bytes)
+                        .map_err(|e| Error::Config(format!("Invalid P2P key: {}", e)))?;
+                    let peer_id = PeerId::from(keypair.public());
+                    info!(%peer_id, path = %path.display(), "Loaded P2P identity from file");
+                    Ok(keypair)
+                } else {
+                    // Generate new key and save it in protobuf encoding
+                    let keypair = libp2p::identity::Keypair::generate_ed25519();
+                    let key_bytes = keypair.to_protobuf_encoding()
+                        .map_err(|e| Error::Config(format!("Failed to encode P2P key: {}", e)))?;
+
+                    // Create parent directory if it doesn't exist
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|e| Error::Config(format!("Failed to create key directory: {}", e)))?;
+                    }
+
+                    std::fs::write(path, &key_bytes)
+                        .map_err(|e| Error::Config(format!("Failed to write P2P key file: {}", e)))?;
+
+                    let peer_id = PeerId::from(keypair.public());
+                    info!(%peer_id, path = %path.display(), "Generated and saved new P2P identity");
+                    Ok(keypair)
+                }
+            }
+            None => {
+                // No key path specified, generate ephemeral key
+                let keypair = libp2p::identity::Keypair::generate_ed25519();
+                let peer_id = PeerId::from(keypair.public());
+                info!(%peer_id, "Generated ephemeral P2P identity (no persistence)");
+                Ok(keypair)
+            }
+        }
     }
 
     /// Create a new network service with a specific keypair

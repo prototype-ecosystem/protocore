@@ -1160,6 +1160,9 @@ impl Node {
             info!(count = boot_nodes.len(), "Parsed boot nodes from config");
         }
 
+        // Use p2p.key in the data directory for persistent peer identity
+        let p2p_key_path = std::path::PathBuf::from(&self.config.storage.data_dir).join("p2p.key");
+
         let network_config = NetworkConfig {
             listen_addr: self.config.network.listen_address.parse()
                 .map_err(|e| anyhow::anyhow!("Invalid listen address: {}", e))?,
@@ -1167,6 +1170,7 @@ impl Node {
             boot_nodes,
             min_peers: 8,
             max_peers: self.config.network.max_peers as usize,
+            p2p_key_path: Some(p2p_key_path),
             ..Default::default()
         };
 
