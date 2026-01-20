@@ -443,15 +443,75 @@ impl ValidatorNode {
             let committed_tx = self.committed_tx.clone();
             let eng = engine.clone();
             let database = Arc::clone(self.node.database());
+            let state_db = Arc::clone(self.node.state_db());
+            let mempool = Arc::clone(self.node.mempool());
             tokio::spawn(async move {
                 while let Some(committed) = rx.recv().await {
                     let height = committed.block.header.height;
                     let hash = committed.block.hash();
+                    let tx_count = committed.block.transactions.len();
                     info!(
                         height = height,
                         hash = %hex::encode(&hash.as_bytes()[..8]),
+                        txs = tx_count,
                         "Block committed"
                     );
+
+                    // Process transactions: update state (nonces, balances)
+                    let mut tx_hashes = Vec::with_capacity(tx_count);
+                    for tx in &committed.block.transactions {
+                        // Get sender address
+                        let sender = match tx.sender() {
+                            Ok(addr) => addr,
+                            Err(e) => {
+                                error!(error = %e, "Failed to recover tx sender");
+                                continue;
+                            }
+                        };
+
+                        // Collect transaction hash for mempool removal
+                        tx_hashes.push(tx.hash());
+
+                        // Increment sender's nonce
+                        state_db.increment_nonce(sender.as_fixed_bytes());
+
+                        // Transfer value from sender to recipient (if any)
+                        let value = tx.value();
+                        if value > 0 {
+                            if let Some(to) = tx.to() {
+                                if let Err(e) = state_db.transfer(
+                                    sender.as_fixed_bytes(),
+                                    to.as_fixed_bytes(),
+                                    value,
+                                ) {
+                                    error!(
+                                        error = %e,
+                                        from = %sender,
+                                        to = %to,
+                                        value = value,
+                                        "Failed to transfer value"
+                                    );
+                                }
+                            }
+                        }
+
+                        debug!(
+                            tx_hash = %hex::encode(&tx.hash().as_bytes()[..8]),
+                            sender = %sender,
+                            "Processed transaction"
+                        );
+                    }
+
+                    // Remove processed transactions from mempool
+                    if !tx_hashes.is_empty() {
+                        mempool.remove_transactions(&tx_hashes);
+                        debug!(count = tx_hashes.len(), "Removed transactions from mempool");
+                    }
+
+                    // Commit state changes
+                    if let Err(e) = state_db.commit() {
+                        error!(error = %e, "Failed to commit state changes");
+                    }
 
                     // Persist the committed block to database
                     let encoded = committed.block.rlp_encode();
@@ -470,7 +530,7 @@ impl ValidatorNode {
                         error!(error = %e, "Failed to store block hash mapping");
                     }
 
-                    info!(height = height, "Block persisted to database");
+                    info!(height = height, txs = tx_count, "Block persisted to database");
 
                     // Broadcast committed block event
                     let _ = committed_tx.send(committed.clone());
