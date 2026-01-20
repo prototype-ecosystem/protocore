@@ -25,7 +25,7 @@ use tracing::{debug, error, info, warn};
 use protocore_config::Config;
 use protocore_consensus::{BlockBuilder, BlockValidator, ConsensusEngine};
 use protocore_crypto::Hash as CryptoHash;
-use protocore_mempool::{AccountStateProvider, Mempool, MempoolConfig};
+use protocore_mempool::{AccountStateProvider, Mempool, MempoolConfig, ValidationConfig};
 use protocore_p2p::{GossipMessage, NetworkConfig, NetworkEvent, NetworkHandle, NetworkService};
 use protocore_rpc::{
     BlockNumberOrTag, CallRequest, EpochInfo, FeeHistory, FinalityCert, GovernanceProposal,
@@ -885,7 +885,12 @@ impl Node {
             dedup_retention_blocks: 128,  // Keep hashes for ~128 blocks for replay protection
             dedup_max_size: 100_000,      // Max 100k seen transaction hashes
         };
-        let mempool = Arc::new(Mempool::new(mempool_config, state_adapter));
+        // Use validation config with correct chain_id from node config
+        let validation_config = ValidationConfig {
+            chain_id: config.chain.chain_id,
+            ..Default::default()
+        };
+        let mempool = Arc::new(Mempool::with_validation_config(mempool_config, validation_config, state_adapter));
 
         // Create event broadcaster
         let (event_tx, _) = broadcast::channel(1000);
