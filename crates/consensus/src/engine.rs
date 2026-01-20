@@ -714,20 +714,14 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
             "COMMITTED block"
         );
 
-        // Send committed block
+        // Send committed block to validator for persistence
+        // IMPORTANT: We do NOT start the next height here. The validator must call
+        // start() after persisting the block to ensure the parent is in the database
+        // before the next proposer tries to build a block.
         let committed = CommittedBlock::new(block.clone(), finality_cert);
         if let Err(e) = self.commit_tx.send(committed).await {
             error!("Failed to send committed block: {}", e);
         }
-
-        // Update parent hash for next height
-        {
-            let mut parent = self.parent_hash.write();
-            *parent = block.hash().into();
-        }
-
-        // Start next height
-        self.start(height + 1, block.hash().into()).await;
     }
 
     /// Create a finality certificate from precommit votes
