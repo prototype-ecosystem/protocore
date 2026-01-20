@@ -30,12 +30,16 @@ parking_lot = { workspace = true }
 
 # Cryptographic hashing (for randomness beacon)
 sha2 = "0.10"
+sha3 = "0.10"
 
 # Ed25519 signatures (for release attestation)
 ed25519-dalek = { version = "2.1", features = ["serde"] }
 
 # Utilities
 hex = { workspace = true }
+
+# JSON serialization (for WAL)
+serde_json = { workspace = true }
 
 # Deterministic RNG for shuffling
 rand = { workspace = true }
@@ -48,6 +52,7 @@ alloy-primitives = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 rand = { workspace = true }
 serde_json = { workspace = true }
+tempfile = "3.10"
 
 [features]
 default = []

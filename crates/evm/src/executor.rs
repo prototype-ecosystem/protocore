@@ -362,6 +362,9 @@ where
     }
 
     /// Execute all transactions in a block
+    ///
+    /// For empty blocks (no transactions), this skips EVM execution entirely
+    /// and returns immediately with the current state root, saving computation.
     pub fn execute_block(
         &mut self,
         transactions: &[TransactionData],
@@ -372,6 +375,28 @@ where
             tx_count = transactions.len(),
             "Executing block"
         );
+
+        // Fast path for empty blocks - skip EVM execution entirely
+        if transactions.is_empty() {
+            debug!(
+                block_number = block.number,
+                "Empty block - skipping EVM execution"
+            );
+
+            // Still need to process end-of-block operations (epoch transitions, etc.)
+            self.process_end_of_block(block)?;
+
+            // Get current state root without any state changes
+            let state_root = self.compute_state_root();
+
+            return Ok(BlockExecutionResult {
+                state_root,
+                receipts_root: B256::ZERO, // Empty receipts root
+                logs_bloom: vec![0u8; 256],
+                receipts: Vec::new(),
+                gas_used: 0,
+            });
+        }
 
         let mut receipts = Vec::with_capacity(transactions.len());
         let mut cumulative_gas_used = 0u64;

@@ -50,6 +50,9 @@ instant = "0.1"
 # Random number generation (for peer selection)
 rand = "0.8"
 
+# Synchronization primitives
+parking_lot = "0.12"
+
 [dev-dependencies]
 tokio-test = "0.4"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

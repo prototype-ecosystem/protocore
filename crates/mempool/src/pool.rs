@@ -38,6 +38,11 @@ pub struct MempoolConfig {
     pub max_pending_per_sender: usize,
     /// Maximum number of queued transactions per sender
     pub max_queued_per_sender: usize,
+    /// Number of blocks to retain seen transaction hashes for deduplication
+    /// Prevents replay of recently confirmed transactions
+    pub dedup_retention_blocks: u64,
+    /// Maximum number of seen transaction hashes to cache
+    pub dedup_max_size: usize,
 }
 
 impl Default for MempoolConfig {
@@ -51,6 +56,8 @@ impl Default for MempoolConfig {
             price_bump_percentage: 10,
             max_pending_per_sender: 64,
             max_queued_per_sender: 64,
+            dedup_retention_blocks: 128,  // Keep hashes for ~128 blocks
+            dedup_max_size: 100_000,      // Max 100k seen hashes
         }
     }
 }
@@ -160,6 +167,152 @@ impl MempoolInner {
     }
 }
 
+/// Transaction deduplication cache for replay protection
+///
+/// Tracks transaction hashes that have been seen (either in the mempool or
+/// included in blocks) to prevent replay attacks. Uses block-height-based
+/// eviction to bound memory usage.
+pub struct TransactionDeduplicationCache {
+    /// Seen transaction hashes indexed by the block height they were added
+    seen_by_height: HashMap<u64, HashSet<H256>>,
+    /// Current block height
+    current_height: u64,
+    /// Number of blocks to retain hashes for
+    retention_blocks: u64,
+    /// Maximum total hashes to cache
+    max_size: usize,
+    /// Total count of cached hashes
+    total_count: usize,
+}
+
+impl TransactionDeduplicationCache {
+    /// Create a new deduplication cache
+    pub fn new(retention_blocks: u64, max_size: usize) -> Self {
+        Self {
+            seen_by_height: HashMap::new(),
+            current_height: 0,
+            retention_blocks,
+            max_size,
+            total_count: 0,
+        }
+    }
+
+    /// Check if a transaction hash has been seen
+    pub fn is_seen(&self, hash: &H256) -> bool {
+        self.seen_by_height.values().any(|set| set.contains(hash))
+    }
+
+    /// Record a transaction hash as seen at the current height
+    ///
+    /// Returns true if the hash was newly recorded, false if already seen.
+    pub fn record(&mut self, hash: H256) -> bool {
+        // Check if already seen
+        if self.is_seen(&hash) {
+            return false;
+        }
+
+        // Check if at capacity
+        if self.total_count >= self.max_size {
+            // Evict oldest block's hashes
+            if let Some(&oldest_height) = self.seen_by_height.keys().min() {
+                self.evict_height(oldest_height);
+            }
+        }
+
+        // Record the hash
+        let height_set = self.seen_by_height.entry(self.current_height).or_insert_with(HashSet::new);
+        height_set.insert(hash);
+        self.total_count += 1;
+        true
+    }
+
+    /// Record multiple transaction hashes from a block
+    pub fn record_block(&mut self, hashes: &[H256], block_height: u64) {
+        // Update current height and evict old entries
+        if block_height > self.current_height {
+            self.current_height = block_height;
+            self.evict_old();
+        }
+
+        for hash in hashes {
+            if !self.is_seen(hash) {
+                if self.total_count >= self.max_size {
+                    if let Some(&oldest_height) = self.seen_by_height.keys().min() {
+                        self.evict_height(oldest_height);
+                    }
+                }
+                let height_set = self.seen_by_height.entry(block_height).or_insert_with(HashSet::new);
+                height_set.insert(*hash);
+                self.total_count += 1;
+            }
+        }
+    }
+
+    /// Update the current height and trigger eviction
+    pub fn update_height(&mut self, height: u64) {
+        if height > self.current_height {
+            self.current_height = height;
+            self.evict_old();
+        }
+    }
+
+    /// Evict hashes older than the retention threshold
+    fn evict_old(&mut self) {
+        if self.current_height <= self.retention_blocks {
+            return;
+        }
+
+        let threshold = self.current_height - self.retention_blocks;
+        let heights_to_evict: Vec<u64> = self.seen_by_height
+            .keys()
+            .filter(|&&h| h < threshold)
+            .copied()
+            .collect();
+
+        for height in heights_to_evict {
+            self.evict_height(height);
+        }
+    }
+
+    /// Evict all hashes at a specific height
+    fn evict_height(&mut self, height: u64) {
+        if let Some(set) = self.seen_by_height.remove(&height) {
+            self.total_count = self.total_count.saturating_sub(set.len());
+            trace!(
+                height = height,
+                count = set.len(),
+                "Evicted transaction hashes from dedup cache"
+            );
+        }
+    }
+
+    /// Get statistics about the cache
+    pub fn stats(&self) -> DedupCacheStats {
+        DedupCacheStats {
+            total_hashes: self.total_count,
+            heights_tracked: self.seen_by_height.len(),
+            current_height: self.current_height,
+        }
+    }
+
+    /// Clear the cache
+    pub fn clear(&mut self) {
+        self.seen_by_height.clear();
+        self.total_count = 0;
+    }
+}
+
+/// Statistics for the deduplication cache
+#[derive(Debug, Clone)]
+pub struct DedupCacheStats {
+    /// Total number of transaction hashes cached
+    pub total_hashes: usize,
+    /// Number of distinct heights being tracked
+    pub heights_tracked: usize,
+    /// Current block height
+    pub current_height: u64,
+}
+
 /// Transaction mempool
 ///
 /// Thread-safe transaction pool that manages pending and queued transactions.
@@ -172,6 +325,8 @@ pub struct Mempool<S: AccountStateProvider> {
     validator: TransactionValidator<S>,
     /// State provider for nonce lookups
     state: Arc<S>,
+    /// Transaction deduplication cache for replay protection
+    dedup_cache: RwLock<TransactionDeduplicationCache>,
 }
 
 impl<S: AccountStateProvider> Mempool<S> {
@@ -185,11 +340,17 @@ impl<S: AccountStateProvider> Mempool<S> {
             chain_id: 1,
         };
 
+        let dedup_cache = TransactionDeduplicationCache::new(
+            config.dedup_retention_blocks,
+            config.dedup_max_size,
+        );
+
         Self {
             inner: RwLock::new(MempoolInner::new()),
             config,
             validator: TransactionValidator::new(validation_config, Arc::clone(&state)),
             state,
+            dedup_cache: RwLock::new(dedup_cache),
         }
     }
 
@@ -199,11 +360,17 @@ impl<S: AccountStateProvider> Mempool<S> {
         validation_config: ValidationConfig,
         state: Arc<S>,
     ) -> Self {
+        let dedup_cache = TransactionDeduplicationCache::new(
+            config.dedup_retention_blocks,
+            config.dedup_max_size,
+        );
+
         Self {
             inner: RwLock::new(MempoolInner::new()),
             config,
             validator: TransactionValidator::new(validation_config, Arc::clone(&state)),
             state,
+            dedup_cache: RwLock::new(dedup_cache),
         }
     }
 
@@ -216,7 +383,16 @@ impl<S: AccountStateProvider> Mempool<S> {
 
         trace!(tx_hash = ?hash, "adding transaction to mempool");
 
-        // Check if already exists
+        // Check deduplication cache first (replay protection)
+        {
+            let dedup = self.dedup_cache.read();
+            if dedup.is_seen(&hash) {
+                debug!(tx_hash = ?hash, "transaction rejected: already seen (replay protection)");
+                return Err(MempoolError::AlreadyExists);
+            }
+        }
+
+        // Check if already exists in pool
         {
             let inner = self.inner.read();
             if inner.by_hash.contains_key(&hash) {
@@ -800,7 +976,16 @@ impl<S: AccountStateProvider> Mempool<S> {
     }
 
     /// Update after new block - remove included transactions and update nonces
-    pub fn on_new_block(&self, included_tx_hashes: &[H256]) {
+    ///
+    /// Also records confirmed transaction hashes in the deduplication cache
+    /// to prevent replay attacks.
+    pub fn on_new_block(&self, included_tx_hashes: &[H256], block_height: u64) {
+        // Record confirmed transactions in dedup cache for replay protection
+        {
+            let mut dedup = self.dedup_cache.write();
+            dedup.record_block(included_tx_hashes, block_height);
+        }
+
         // Remove included transactions
         self.remove_transactions(included_tx_hashes);
 
@@ -815,6 +1000,27 @@ impl<S: AccountStateProvider> Mempool<S> {
             let pending_nonce = self.get_pending_nonce_inner(&inner, &sender, account_nonce);
             self.promote_queued_transactions(&mut inner, &sender, pending_nonce);
         }
+    }
+
+    /// Update the deduplication cache height without a block
+    ///
+    /// Useful when syncing or catching up to trigger eviction of old entries.
+    pub fn update_dedup_height(&self, height: u64) {
+        let mut dedup = self.dedup_cache.write();
+        dedup.update_height(height);
+    }
+
+    /// Get deduplication cache statistics
+    pub fn dedup_stats(&self) -> DedupCacheStats {
+        self.dedup_cache.read().stats()
+    }
+
+    /// Check if a transaction hash has been seen (replay protection)
+    pub fn is_tx_seen(&self, hash: &H256) -> bool {
+        // Check both dedup cache and current pool
+        let in_dedup = self.dedup_cache.read().is_seen(hash);
+        let in_pool = self.inner.read().by_hash.contains_key(hash);
+        in_dedup || in_pool
     }
 
     /// Get mempool statistics

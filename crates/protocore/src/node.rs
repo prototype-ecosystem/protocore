@@ -68,13 +68,19 @@ impl AccountStateProvider for StateDBAdapter {
 pub struct RpcStateAdapter {
     database: Arc<Database>,
     state_db: Arc<StateDB>,
+    mempool: Arc<Mempool<StateDBAdapter>>,
     chain_id: u64,
 }
 
 impl RpcStateAdapter {
     /// Create a new RpcStateAdapter
-    pub fn new(database: Arc<Database>, state_db: Arc<StateDB>, chain_id: u64) -> Self {
-        Self { database, state_db, chain_id }
+    pub fn new(
+        database: Arc<Database>,
+        state_db: Arc<StateDB>,
+        mempool: Arc<Mempool<StateDBAdapter>>,
+        chain_id: u64,
+    ) -> Self {
+        Self { database, state_db, mempool, chain_id }
     }
 
     /// Get block number from tag
@@ -323,9 +329,32 @@ impl StateProvider for RpcStateAdapter {
         Ok(protocore_rpc::SyncStatus::NotSyncing(false))
     }
 
-    async fn send_raw_transaction(&self, _data: &[u8]) -> Result<protocore_rpc::H256, RpcError> {
-        // In production, would decode, validate, and add to mempool
-        Err(RpcError::Internal("Transaction submission not implemented".to_string()))
+    async fn send_raw_transaction(&self, data: &[u8]) -> Result<protocore_rpc::H256, RpcError> {
+        use protocore_types::SignedTransaction;
+
+        // Decode the raw transaction
+        let tx = SignedTransaction::rlp_decode(data)
+            .map_err(|e| RpcError::InvalidParams(format!("Failed to decode transaction: {}", e)))?;
+
+        // Verify chain ID matches
+        if tx.chain_id() != Some(self.chain_id) {
+            return Err(RpcError::InvalidParams(format!(
+                "Chain ID mismatch: expected {}, got {:?}",
+                self.chain_id,
+                tx.chain_id()
+            )));
+        }
+
+        // Add to mempool (validates signature, nonce, balance, etc.)
+        let hash = self.mempool.add_transaction(tx)
+            .map_err(|e| RpcError::TransactionRejected(format!("{}", e)))?;
+
+        info!(
+            tx_hash = %hex::encode(&hash.as_bytes()[..8]),
+            "Transaction submitted to mempool"
+        );
+
+        Ok(protocore_rpc::H256(*hash.as_fixed_bytes()))
     }
 
     async fn get_block_transaction_count(&self, block: &BlockNumberOrTag) -> Result<Option<u64>, RpcError> {
@@ -808,6 +837,8 @@ impl BlockBuilder for NodeBlockBuilder {
                 gas_used: 0,
                 base_fee,
                 last_finality_cert_hash: None,
+                validator_set_hash: H256::NIL, // TODO: Compute from genesis validators
+                next_validator_set_hash: None,
             },
             transactions: txs,
         }
@@ -826,12 +857,17 @@ impl Node {
         let database = Self::init_database(&config)?;
 
         // Initialize genesis block if this is first startup
-        Self::init_genesis(&database, &config)?;
+        let is_fresh_genesis = Self::init_genesis(&database, &config)?;
 
         let database = Arc::new(database);
 
         // Initialize state database
         let state_db = Arc::new(StateDB::new(Arc::clone(&database)));
+
+        // Initialize genesis accounts if this is a fresh genesis
+        if is_fresh_genesis {
+            Self::init_genesis_accounts(&state_db, &config)?;
+        }
 
         // Create state adapter for mempool
         let state_adapter = Arc::new(StateDBAdapter::new(Arc::clone(&state_db)));
@@ -846,6 +882,8 @@ impl Node {
             price_bump_percentage: 10,
             max_pending_per_sender: 64,
             max_queued_per_sender: 64,
+            dedup_retention_blocks: 128,  // Keep hashes for ~128 blocks for replay protection
+            dedup_max_size: 100_000,      // Max 100k seen transaction hashes
         };
         let mempool = Arc::new(Mempool::new(mempool_config, state_adapter));
 
@@ -885,14 +923,15 @@ impl Node {
     }
 
     /// Initialize genesis block if needed (first time startup)
-    fn init_genesis(database: &Database, config: &Config) -> Result<()> {
+    /// Returns true if this was a fresh genesis initialization
+    fn init_genesis(database: &Database, config: &Config) -> Result<bool> {
         // Check if genesis already exists by looking for latest_height metadata
         if database.get_metadata(b"latest_height")
             .map_err(|e| anyhow::anyhow!("Failed to check metadata: {}", e))?
             .is_some()
         {
             info!("Genesis block already exists, skipping initialization");
-            return Ok(());
+            return Ok(false);
         }
 
         info!("Initializing genesis block");
@@ -907,13 +946,15 @@ impl Node {
             timestamp: genesis_timestamp,
             parent_hash: H256::NIL,
             transactions_root: H256::NIL,
-            state_root: H256::NIL,  // TODO: Compute from genesis accounts
+            state_root: H256::NIL,  // State root computed after account initialization
             receipts_root: H256::NIL,
             proposer: Address::ZERO,
             gas_limit: config.economics.block_gas_limit,
             gas_used: 0,
             base_fee: config.economics.min_base_fee.parse().unwrap_or(1_000_000_000),
             last_finality_cert_hash: None,
+            validator_set_hash: H256::NIL, // TODO: Compute from genesis validators
+            next_validator_set_hash: None,
         };
 
         let genesis_block = Block::new(header, Vec::new());
@@ -935,6 +976,58 @@ impl Node {
             "Genesis block initialized"
         );
 
+        Ok(true) // Return true to indicate fresh genesis
+    }
+
+    /// Initialize genesis accounts in StateDB after it's created
+    fn init_genesis_accounts(state_db: &StateDB, config: &Config) -> Result<()> {
+        if config.genesis.accounts.is_empty() {
+            return Ok(());
+        }
+
+        info!(
+            accounts = config.genesis.accounts.len(),
+            "Initializing genesis account balances"
+        );
+
+        for account in &config.genesis.accounts {
+            // Parse address (strip 0x prefix if present)
+            let addr_hex = account.address.strip_prefix("0x").unwrap_or(&account.address);
+            let addr_bytes = hex::decode(addr_hex)
+                .map_err(|e| anyhow::anyhow!("Invalid genesis address {}: {}", account.address, e))?;
+
+            if addr_bytes.len() != 20 {
+                return Err(anyhow::anyhow!("Invalid address length for {}", account.address));
+            }
+
+            let mut address = [0u8; 20];
+            address.copy_from_slice(&addr_bytes);
+
+            // Parse balance (support both decimal and hex)
+            let balance: u128 = if account.balance.starts_with("0x") {
+                u128::from_str_radix(account.balance.strip_prefix("0x").unwrap(), 16)
+                    .map_err(|e| anyhow::anyhow!("Invalid balance {}: {}", account.balance, e))?
+            } else {
+                account.balance.parse()
+                    .map_err(|e| anyhow::anyhow!("Invalid balance {}: {}", account.balance, e))?
+            };
+
+            // Create account with balance using StateDB's set_account
+            let account_data = protocore_storage::Account::with_balance(balance);
+            state_db.set_account(&address, account_data);
+
+            info!(
+                address = %account.address,
+                balance = %balance,
+                "Initialized genesis account"
+            );
+        }
+
+        // Commit state changes to persist genesis accounts
+        state_db.commit()
+            .map_err(|e| anyhow::anyhow!("Failed to commit genesis accounts: {}", e))?;
+
+        info!("Genesis accounts committed to state");
         Ok(())
     }
 
@@ -1238,6 +1331,7 @@ impl Node {
         let state_provider = Arc::new(RpcStateAdapter::new(
             Arc::clone(&self.database),
             Arc::clone(&self.state_db),
+            Arc::clone(&self.mempool),
             self.config.chain.chain_id,
         ));
 

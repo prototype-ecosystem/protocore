@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/protocore",
+    "crates/core",
     "crates/consensus",
     "crates/evm",
     "crates/p2p",
@@ -26,6 +27,7 @@ repository = "https://github.com/prototype-network/proto-core"
 
 [workspace.dependencies]
 # Internal crates
+protocore-core = { path = "crates/core" }
 protocore-types = { path = "crates/types" }
 protocore-crypto = { path = "crates/crypto" }
 protocore-config = { path = "crates/config" }
@@ -88,6 +90,7 @@ anyhow = "1.0"
 parking_lot = "0.12"
 bytes = "1.5"
 once_cell = "1.19"
+bs58 = "0.5"
 
 [profile.release]
 lto = true

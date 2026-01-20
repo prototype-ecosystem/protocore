@@ -15,9 +15,11 @@
 pub mod db;
 // pub mod hibernation;  // Deferred to phase2/ (depends on rent)
 pub mod loyalty;
+pub mod pruning;
 // pub mod rent;  // Deferred to phase2/
 pub mod snapshot;
 pub mod state;
+pub mod testnet_incentives;
 pub mod trie;
 
 // Re-exports for convenience
@@ -28,8 +30,16 @@ pub use db::{Database, DatabaseConfig, WriteBatch};
 pub use loyalty::{
     LoyaltyError, LoyaltySnapshot, LoyaltyStatus, LoyaltyTracker, ValidatorRegistration,
 };
+pub use pruning::{
+    Checkpoint, PruningConfig, PruningManager, PruningStats,
+    DEFAULT_BLOCKS_RETAINED, DEFAULT_CHECKPOINT_INTERVAL, MIN_BLOCKS_RETAINED,
+};
 pub use snapshot::{Snapshot, SnapshotChunk, SnapshotManager};
 pub use state::{Account, StateDB, StateDiff};
+pub use testnet_incentives::{
+    ActivityType, AirdropExport, LeaderboardSnapshot, ParticipationEvent,
+    TestnetIncentivesConfig, TestnetIncentivesTracker, TotalStats, UserStats,
+};
 pub use trie::{MerkleTrie, MerkleProof, TrieNode};
 
 use sha3::{Digest, Keccak256};

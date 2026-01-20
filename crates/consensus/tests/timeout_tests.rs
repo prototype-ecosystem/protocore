@@ -73,7 +73,7 @@ impl TimeoutConfigExt for TimeoutConfig {
             Step::Propose => self.propose(round),
             Step::Prevote => self.prevote(round),
             Step::Precommit => self.precommit(round),
-            Step::Commit => Duration::ZERO,
+            Step::Commit | Step::NewHeight => Duration::ZERO,
         }
     }
 }

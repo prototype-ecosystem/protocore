@@ -31,6 +31,7 @@
 #![warn(rust_2018_idioms)]
 #![deny(unsafe_code)]
 
+pub mod ddos;
 pub mod eth;
 pub mod protocore;
 pub mod server;
@@ -47,6 +48,10 @@ pub use protocore::{
 pub use server::{RpcServer, RpcServerBuilder, RpcServerConfig};
 pub use types::*;
 pub use ws::{SubscriptionApiImpl, SubscriptionApiServer, SubscriptionManager};
+pub use ddos::{
+    ApiTier, CircuitState, MethodCosts, RateLimitResult, RpcDdosConfig, RpcDdosProtection,
+    RpcDdosStats, RpcRejectReason,
+};
 
 /// Result type alias for RPC operations
 pub type Result<T> = std::result::Result<T, RpcError>;

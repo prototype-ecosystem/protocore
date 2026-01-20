@@ -14,22 +14,33 @@
 //! ## Functions
 //!
 //! ### Write Operations
-//! - `submitEvidence(evidence)` - Submit evidence of misbehavior
+//! - `submitDoubleSignEvidence(bytes,bytes)` - Submit equivocation evidence
 //! - `unjail()` - Request unjailing after jail period
 //!
 //! ### View Functions
 //! - `getSlashingInfo(validator)` - Get slashing history and status
+//! - `isJailed(validator)` - Check if validator is jailed
+//!
+//! ## Evidence Verification
+//!
+//! Evidence is verified using BLS signatures from the consensus layer:
+//! 1. Decode the two conflicting votes from ABI-encoded input
+//! 2. Verify structural requirements (same validator, height, round, different blocks)
+//! 3. Verify BLS signatures on both votes
+//! 4. Check evidence age (must be within EVIDENCE_MAX_AGE_BLOCKS)
+//! 5. Apply slashing and jail the validator
 
 use alloy_primitives::{Address, Bytes, B256, U256};
+use protocore_consensus::evidence::{EquivocationEvidence, EVIDENCE_MAX_AGE_BLOCKS};
+use protocore_consensus::types::{ValidatorId, ValidatorSet, Vote, VoteType};
+use protocore_crypto::bls::{BlsPublicKey, BlsSignature};
 use revm::Database;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, info, warn};
 
-use super::{
-    abi, slashing_selectors, PrecompileError, PrecompileOutput, SLASHING_ADDRESS,
-};
+use super::{abi, slashing_selectors, PrecompileError, PrecompileOutput, SLASHING_ADDRESS};
 use crate::state_adapter::StateAdapter;
 
 /// Slash percentage for double signing (5%)
@@ -56,10 +67,20 @@ pub const PERMANENT_JAIL: u64 = u64::MAX;
 /// Percentage of slashed amount given to evidence reporter (10%)
 pub const REPORTER_REWARD_PERCENT: u8 = 10;
 
+/// Percentage of slashed amount that is burned (90%)
+pub const BURN_PERCENT: u8 = 90;
+
+/// Minimum stake required to submit evidence (spam prevention)
+pub const MIN_EVIDENCE_SUBMITTER_STAKE: u128 = 1_000 * 10u128.pow(18); // 1,000 MCN
+
+/// Rate limit: max evidence submissions per block per submitter
+pub const MAX_EVIDENCE_PER_BLOCK_PER_SUBMITTER: u8 = 3;
+
 /// Gas costs for slashing operations
-pub const GAS_SUBMIT_EVIDENCE: u64 = 150_000;
+pub const GAS_SUBMIT_EVIDENCE: u64 = 200_000;
 pub const GAS_UNJAIL: u64 = 50_000;
 pub const GAS_GET_SLASHING_INFO: u64 = 10_000;
+pub const GAS_IS_JAILED: u64 = 5_000;
 
 /// Evidence type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,32 +113,6 @@ impl TryFrom<u8> for EvidenceType {
     }
 }
 
-/// Vote structure for double-sign evidence
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Vote {
-    /// Block height
-    pub height: u64,
-    /// Voting round
-    pub round: u32,
-    /// Vote type (0 = prevote, 1 = precommit)
-    pub vote_type: u8,
-    /// Block hash being voted for
-    pub block_hash: B256,
-    /// Validator index
-    pub validator_index: u32,
-    /// Signature over the vote (BLS signature, 96 bytes)
-    pub signature: Vec<u8>,
-}
-
-/// Double-sign evidence containing two conflicting votes
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DoubleSignEvidence {
-    /// First vote
-    pub vote_a: Vote,
-    /// Second conflicting vote
-    pub vote_b: Vote,
-}
-
 /// Slashing record for tracking slashing history
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlashingRecord {
@@ -129,6 +124,10 @@ pub struct SlashingRecord {
     pub offense_type: EvidenceType,
     /// Evidence hash
     pub evidence_hash: B256,
+    /// Reporter who submitted the evidence
+    pub reporter: Address,
+    /// Reporter reward paid
+    pub reporter_reward: u128,
 }
 
 /// Validator slashing info
@@ -148,13 +147,51 @@ pub struct ValidatorSlashingInfo {
     pub missed_blocks_window_start: u64,
 }
 
+/// Rate limit tracker for evidence submission
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EvidenceRateLimiter {
+    /// Submissions per address per block: (block_number, address) -> count
+    pub submissions: HashMap<(u64, Address), u8>,
+}
+
+impl EvidenceRateLimiter {
+    /// Check if submission is allowed and increment counter
+    pub fn check_and_increment(
+        &mut self,
+        block_number: u64,
+        submitter: Address,
+    ) -> Result<(), PrecompileError> {
+        let key = (block_number, submitter);
+        let count = self.submissions.entry(key).or_insert(0);
+
+        if *count >= MAX_EVIDENCE_PER_BLOCK_PER_SUBMITTER {
+            return Err(PrecompileError::InvalidInput(
+                "rate limit exceeded: too many evidence submissions this block".into(),
+            ));
+        }
+
+        *count += 1;
+        Ok(())
+    }
+
+    /// Clean up old entries (call periodically)
+    pub fn prune(&mut self, min_block: u64) {
+        self.submissions.retain(|(block, _), _| *block >= min_block);
+    }
+}
+
 /// Slashing state
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SlashingState {
-    /// Validator slashing info by address
+    /// Validator slashing info by validator address
     pub validators: HashMap<Address, ValidatorSlashingInfo>,
     /// Processed evidence hashes to prevent duplicates
     pub processed_evidence: HashSet<B256>,
+    /// Rate limiter for evidence submission
+    pub rate_limiter: EvidenceRateLimiter,
+    /// Validator set for signature verification (updated each epoch)
+    #[serde(skip)]
+    pub validator_set: Option<ValidatorSet>,
 }
 
 /// Slashing precompile implementation
@@ -182,17 +219,24 @@ impl SlashingPrecompile {
             slashing_selectors::SUBMIT_DOUBLE_SIGN_EVIDENCE => {
                 Self::submit_double_sign_evidence(caller, data, block_number, db)
             }
-            slashing_selectors::UNJAIL => {
-                Self::unjail(caller, block_number, db)
-            }
-            slashing_selectors::GET_SLASHING_INFO => {
-                Self::get_slashing_info(data, db)
-            }
+            slashing_selectors::UNJAIL => Self::unjail(caller, block_number, db),
+            slashing_selectors::GET_SLASHING_INFO => Self::get_slashing_info(data, db),
             _ => Err(PrecompileError::UnknownSelector { selector }),
         }
     }
 
     /// Submit double-signing evidence
+    ///
+    /// Evidence format (ABI-encoded):
+    /// - vote_a: encoded Vote struct
+    /// - vote_b: encoded Vote struct
+    ///
+    /// The votes must:
+    /// 1. Be from the same validator
+    /// 2. Be at the same height and round
+    /// 3. Be the same vote type (prevote or precommit)
+    /// 4. Have different block hashes
+    /// 5. Have valid BLS signatures
     fn submit_double_sign_evidence<DB: Database>(
         reporter: Address,
         data: &[u8],
@@ -202,46 +246,59 @@ impl SlashingPrecompile {
     where
         DB::Error: std::fmt::Debug,
     {
-        info!(reporter = %reporter, "Processing double-sign evidence");
-
-        // Decode the two votes from ABI-encoded data
-        // Format: vote1_offset, vote2_offset, vote1_data, vote2_data
-        let vote1_offset = abi::decode_u256(data, 0)
-            .ok_or_else(|| PrecompileError::InvalidInput("invalid vote1 offset".into()))?
-            .as_limbs()[0] as usize;
-
-        let vote2_offset = abi::decode_u256(data, 32)
-            .ok_or_else(|| PrecompileError::InvalidInput("invalid vote2 offset".into()))?
-            .as_limbs()[0] as usize;
-
-        let vote_a = Self::decode_vote(data, vote1_offset)?;
-        let vote_b = Self::decode_vote(data, vote2_offset)?;
-
-        let evidence = DoubleSignEvidence { vote_a, vote_b };
-
-        // Verify evidence validity
-        let validator_addr = Self::verify_double_sign_evidence(&evidence)?;
-
-        // Calculate evidence hash
-        let evidence_hash = Self::hash_evidence(&evidence);
+        info!(reporter = %reporter, block = block_number, "Processing double-sign evidence");
 
         // Load slashing state
         let mut state = Self::load_state(db)?;
+
+        // Check rate limit (DoS protection)
+        state.rate_limiter.check_and_increment(block_number, reporter)?;
+
+        // Decode the evidence from ABI-encoded data
+        let evidence = Self::decode_evidence(data)?;
+
+        // Calculate evidence hash for deduplication
+        let evidence_hash = B256::from(evidence.hash());
 
         // Check for duplicate evidence
         if state.processed_evidence.contains(&evidence_hash) {
             return Err(PrecompileError::DuplicateEvidence);
         }
 
+        // Check evidence age
+        Self::check_evidence_age(&evidence, block_number)?;
+
+        // Get validator set for signature verification
+        let validator_set = state.validator_set.clone().ok_or_else(|| {
+            PrecompileError::InvalidInput("validator set not available".into())
+        })?;
+
+        // Validate the evidence (verifies signatures)
+        evidence.validate(&validator_set).map_err(|e| {
+            PrecompileError::InvalidEvidence(format!("evidence validation failed: {}", e))
+        })?;
+
+        // Get the validator's address from their ID
+        let validator = validator_set
+            .get_validator(evidence.validator_id)
+            .ok_or_else(|| {
+                PrecompileError::InvalidEvidence(format!(
+                    "validator {} not found",
+                    evidence.validator_id
+                ))
+            })?;
+
+        let validator_addr = Address::from(validator.address);
+
         // Get validator slashing info
         let validator_info = state.validators.entry(validator_addr).or_default();
 
-        // Check if already jailed for this offense type
+        // Check if already permanently jailed for this offense type
         if validator_info.jailed && validator_info.jailed_until == PERMANENT_JAIL {
             return Err(PrecompileError::PermanentlyJailed);
         }
 
-        // Load staking state to get validator's stake
+        // Get validator's stake for slashing calculation
         let validator_stake = Self::get_validator_stake(db, validator_addr)?;
 
         // Calculate slash amount (5% for double signing)
@@ -260,10 +317,17 @@ impl SlashingPrecompile {
             amount: slash_amount,
             offense_type: EvidenceType::DoubleSigning,
             evidence_hash,
+            reporter,
+            reporter_reward,
         });
 
         // Record evidence as processed
         state.processed_evidence.insert(evidence_hash);
+
+        // Clean up rate limiter (keep last 100 blocks)
+        if block_number > 100 {
+            state.rate_limiter.prune(block_number - 100);
+        }
 
         // Save state
         Self::save_state(db, &state)?;
@@ -274,6 +338,8 @@ impl SlashingPrecompile {
             slash_amount,
             EvidenceType::DoubleSigning,
             PERMANENT_JAIL,
+            reporter,
+            reporter_reward,
         );
 
         warn!(
@@ -282,6 +348,8 @@ impl SlashingPrecompile {
             reporter = %reporter,
             reporter_reward = reporter_reward,
             burn_amount = burn_amount,
+            evidence_hash = %evidence_hash,
+            evidence_height = evidence.height,
             "Validator slashed for double signing"
         );
 
@@ -296,6 +364,105 @@ impl SlashingPrecompile {
             GAS_SUBMIT_EVIDENCE,
             vec![log],
         ))
+    }
+
+    /// Decode equivocation evidence from ABI-encoded data
+    fn decode_evidence(data: &[u8]) -> Result<EquivocationEvidence, PrecompileError> {
+        // Try to decode using the consensus layer's decoder first
+        if let Some(evidence) = EquivocationEvidence::decode_from_submission(data) {
+            return Ok(evidence);
+        }
+
+        // Fallback: decode manually for backward compatibility
+        if data.len() < 64 {
+            return Err(PrecompileError::InvalidInput("evidence data too short".into()));
+        }
+
+        // Decode vote offsets
+        let vote1_offset = abi::decode_u256(data, 0)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid vote1 offset".into()))?
+            .as_limbs()[0] as usize;
+
+        let vote2_offset = abi::decode_u256(data, 32)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid vote2 offset".into()))?
+            .as_limbs()[0] as usize;
+
+        let vote_a = Self::decode_vote(data, vote1_offset)?;
+        let vote_b = Self::decode_vote(data, vote2_offset)?;
+
+        EquivocationEvidence::new(vote_a, vote_b).map_err(|e| {
+            PrecompileError::InvalidEvidence(format!("invalid evidence structure: {}", e))
+        })
+    }
+
+    /// Decode a consensus Vote from ABI-encoded data
+    fn decode_vote(data: &[u8], offset: usize) -> Result<Vote, PrecompileError> {
+        if data.len() < offset + 256 {
+            return Err(PrecompileError::InvalidInput("vote data too short".into()));
+        }
+
+        let height = abi::decode_u64(data, offset)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid vote height".into()))?;
+
+        let round = abi::decode_u64(data, offset + 32)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid vote round".into()))?;
+
+        let vote_type_raw = abi::decode_u8(data, offset + 64)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid vote type".into()))?;
+
+        let vote_type = match vote_type_raw {
+            0 => VoteType::Prevote,
+            1 => VoteType::Precommit,
+            _ => {
+                return Err(PrecompileError::InvalidInput(format!(
+                    "invalid vote type: {}",
+                    vote_type_raw
+                )))
+            }
+        };
+
+        let mut block_hash = [0u8; 32];
+        block_hash.copy_from_slice(&data[offset + 96..offset + 128]);
+
+        let validator_id = abi::decode_u64(data, offset + 128)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid validator index".into()))?
+            as ValidatorId;
+
+        // Read signature (96 bytes from 3 words starting at offset + 160)
+        let mut sig_bytes = [0u8; 96];
+        if data.len() >= offset + 256 {
+            sig_bytes[0..32].copy_from_slice(&data[offset + 160..offset + 192]);
+            sig_bytes[32..64].copy_from_slice(&data[offset + 192..offset + 224]);
+            sig_bytes[64..96].copy_from_slice(&data[offset + 224..offset + 256]);
+        }
+
+        let signature = BlsSignature::from_bytes(&sig_bytes)
+            .map_err(|e| PrecompileError::InvalidInput(format!("invalid BLS signature: {}", e)))?;
+
+        Ok(Vote {
+            vote_type,
+            height,
+            round,
+            block_hash,
+            validator_id,
+            signature,
+        })
+    }
+
+    /// Check if evidence is within the acceptable age window
+    fn check_evidence_age(
+        evidence: &EquivocationEvidence,
+        current_height: u64,
+    ) -> Result<(), PrecompileError> {
+        if current_height > evidence.height
+            && current_height - evidence.height > EVIDENCE_MAX_AGE_BLOCKS
+        {
+            return Err(PrecompileError::InvalidEvidence(format!(
+                "evidence too old: height {}, current {}, max age {}",
+                evidence.height, current_height, EVIDENCE_MAX_AGE_BLOCKS
+            )));
+        }
+        Ok(())
     }
 
     /// Request unjailing after jail period expires
@@ -370,7 +537,7 @@ impl SlashingPrecompile {
             output.extend_from_slice(&abi::encode_u256(U256::from(info.total_slashed)));
             output.extend_from_slice(&abi::encode_u256(U256::from(info.slashing_history.len())));
 
-            // Encode slashing history (simplified - just heights and amounts)
+            // Encode slashing history (simplified - just heights, amounts, and reporters)
             // Offset to dynamic array
             output.extend_from_slice(&abi::encode_u256(U256::from(5 * 32)));
 
@@ -378,6 +545,8 @@ impl SlashingPrecompile {
                 output.extend_from_slice(&abi::encode_u256(U256::from(record.height)));
                 output.extend_from_slice(&abi::encode_u256(U256::from(record.amount)));
                 output.extend_from_slice(&abi::encode_u8(record.offense_type as u8));
+                output.extend_from_slice(&abi::encode_address(record.reporter));
+                output.extend_from_slice(&abi::encode_u256(U256::from(record.reporter_reward)));
             }
         } else {
             // Default values for non-existent validator
@@ -391,115 +560,6 @@ impl SlashingPrecompile {
             Bytes::from(output),
             GAS_GET_SLASHING_INFO,
         ))
-    }
-
-    /// Decode a vote from ABI-encoded data
-    fn decode_vote(data: &[u8], offset: usize) -> Result<Vote, PrecompileError> {
-        if data.len() < offset + 192 {
-            // 6 fields * 32 bytes each
-            return Err(PrecompileError::InvalidInput("vote data too short".into()));
-        }
-
-        let height = abi::decode_u64(data, offset)
-            .ok_or_else(|| PrecompileError::InvalidInput("invalid vote height".into()))?;
-
-        let round = abi::decode_u256(data, offset + 32)
-            .ok_or_else(|| PrecompileError::InvalidInput("invalid vote round".into()))?
-            .as_limbs()[0] as u32;
-
-        let vote_type = abi::decode_u8(data, offset + 64)
-            .ok_or_else(|| PrecompileError::InvalidInput("invalid vote type".into()))?;
-
-        let block_hash_bytes: [u8; 32] = data[offset + 96..offset + 128]
-            .try_into()
-            .map_err(|_| PrecompileError::InvalidInput("invalid block hash".into()))?;
-        let block_hash = B256::from(block_hash_bytes);
-
-        let validator_index = abi::decode_u256(data, offset + 128)
-            .ok_or_else(|| PrecompileError::InvalidInput("invalid validator index".into()))?
-            .as_limbs()[0] as u32;
-
-        // Signature is in the next 96 bytes (3 words), but only first 96 bytes used
-        let mut signature = vec![0u8; 96];
-        if data.len() >= offset + 256 {
-            signature.copy_from_slice(&data[offset + 160..offset + 256]);
-        }
-
-        Ok(Vote {
-            height,
-            round,
-            vote_type,
-            block_hash,
-            validator_index,
-            signature,
-        })
-    }
-
-    /// Verify double-sign evidence and return the validator address
-    fn verify_double_sign_evidence(
-        evidence: &DoubleSignEvidence,
-    ) -> Result<Address, PrecompileError> {
-        let vote_a = &evidence.vote_a;
-        let vote_b = &evidence.vote_b;
-
-        // Must be same validator
-        if vote_a.validator_index != vote_b.validator_index {
-            return Err(PrecompileError::InvalidEvidence(
-                "votes from different validators".into(),
-            ));
-        }
-
-        // Must be same height
-        if vote_a.height != vote_b.height {
-            return Err(PrecompileError::InvalidEvidence(
-                "votes at different heights".into(),
-            ));
-        }
-
-        // Must be same round
-        if vote_a.round != vote_b.round {
-            return Err(PrecompileError::InvalidEvidence(
-                "votes in different rounds".into(),
-            ));
-        }
-
-        // Must be same vote type
-        if vote_a.vote_type != vote_b.vote_type {
-            return Err(PrecompileError::InvalidEvidence(
-                "different vote types".into(),
-            ));
-        }
-
-        // Must have DIFFERENT block hashes (this is the actual offense)
-        if vote_a.block_hash == vote_b.block_hash {
-            return Err(PrecompileError::InvalidEvidence(
-                "same block hash - not double signing".into(),
-            ));
-        }
-
-        // In a real implementation, we would:
-        // 1. Look up the validator by index from the validator set
-        // 2. Verify both signatures against the validator's BLS public key
-        // 3. Return the validator's address
-
-        // For now, derive a deterministic address from the validator index
-        let mut addr_bytes = [0u8; 20];
-        addr_bytes[16..20].copy_from_slice(&vote_a.validator_index.to_be_bytes());
-        Ok(Address::from(addr_bytes))
-    }
-
-    /// Hash evidence for deduplication
-    fn hash_evidence(evidence: &DoubleSignEvidence) -> B256 {
-        let mut hasher = Keccak256::new();
-        hasher.update(&evidence.vote_a.height.to_be_bytes());
-        hasher.update(&evidence.vote_a.round.to_be_bytes());
-        hasher.update(&evidence.vote_a.validator_index.to_be_bytes());
-        hasher.update(&evidence.vote_a.block_hash.0);
-        hasher.update(&evidence.vote_b.block_hash.0);
-        let result = hasher.finalize();
-        let mut hash = [0u8; 32];
-        hash.copy_from_slice(&result);
-        B256::from(hash)
     }
 
     /// Get validator's total stake from staking state
@@ -538,33 +598,45 @@ impl SlashingPrecompile {
         Ok(())
     }
 
+    /// Set the validator set for signature verification
+    ///
+    /// This should be called at the beginning of each epoch to update
+    /// the validator set used for evidence verification.
+    pub fn set_validator_set(state: &mut SlashingState, validator_set: ValidatorSet) {
+        state.validator_set = Some(validator_set);
+    }
+
     /// Create ValidatorSlashed event log
     fn create_validator_slashed_event(
         validator: Address,
         amount: u128,
         offense_type: EvidenceType,
         jailed_until: u64,
+        reporter: Address,
+        reporter_reward: u128,
     ) -> revm::primitives::Log {
-        let event_sig = keccak256(b"ValidatorSlashed(address,uint256,uint8,uint256)");
+        let event_sig =
+            keccak256(b"ValidatorSlashed(address,uint256,uint8,uint256,address,uint256)");
 
         let mut topic1 = [0u8; 32];
         topic1[12..32].copy_from_slice(validator.as_slice());
 
+        let mut topic2 = [0u8; 32];
+        topic2[12..32].copy_from_slice(reporter.as_slice());
+
         let topics = vec![
             B256::from(event_sig),
             B256::from(topic1),
+            B256::from(topic2),
         ];
 
         let mut data = Vec::new();
         data.extend_from_slice(&abi::encode_u256(U256::from(amount)));
         data.extend_from_slice(&abi::encode_u8(offense_type as u8));
         data.extend_from_slice(&abi::encode_u256(U256::from(jailed_until)));
+        data.extend_from_slice(&abi::encode_u256(U256::from(reporter_reward)));
 
-        revm::primitives::Log::new_unchecked(
-            SLASHING_ADDRESS,
-            topics,
-            Bytes::from(data),
-        )
+        revm::primitives::Log::new_unchecked(SLASHING_ADDRESS, topics, Bytes::from(data))
     }
 
     /// Create ValidatorUnjailed event log
@@ -574,16 +646,9 @@ impl SlashingPrecompile {
         let mut topic1 = [0u8; 32];
         topic1[12..32].copy_from_slice(validator.as_slice());
 
-        let topics = vec![
-            B256::from(event_sig),
-            B256::from(topic1),
-        ];
+        let topics = vec![B256::from(event_sig), B256::from(topic1)];
 
-        revm::primitives::Log::new_unchecked(
-            SLASHING_ADDRESS,
-            topics,
-            Bytes::new(),
-        )
+        revm::primitives::Log::new_unchecked(SLASHING_ADDRESS, topics, Bytes::new())
     }
 }
 
@@ -595,4 +660,57 @@ fn keccak256(data: &[u8]) -> [u8; 32] {
     let mut hash = [0u8; 32];
     hash.copy_from_slice(&result);
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_evidence_type_conversion() {
+        assert_eq!(EvidenceType::try_from(0).unwrap(), EvidenceType::DoubleSigning);
+        assert_eq!(EvidenceType::try_from(1).unwrap(), EvidenceType::Downtime);
+        assert_eq!(EvidenceType::try_from(2).unwrap(), EvidenceType::InvalidBlock);
+        assert_eq!(EvidenceType::try_from(3).unwrap(), EvidenceType::Censorship);
+        assert!(EvidenceType::try_from(4).is_err());
+    }
+
+    #[test]
+    fn test_rate_limiter() {
+        let mut limiter = EvidenceRateLimiter::default();
+        let addr = Address::ZERO;
+
+        // First 3 submissions should succeed
+        for _ in 0..MAX_EVIDENCE_PER_BLOCK_PER_SUBMITTER {
+            assert!(limiter.check_and_increment(100, addr).is_ok());
+        }
+
+        // 4th submission should fail
+        assert!(limiter.check_and_increment(100, addr).is_err());
+
+        // Different block should succeed
+        assert!(limiter.check_and_increment(101, addr).is_ok());
+    }
+
+    #[test]
+    fn test_slash_calculation() {
+        let stake = 100_000 * 10u128.pow(18); // 100,000 tokens
+
+        // Double signing: 5%
+        let slash = stake * DOUBLE_SIGN_SLASH_PERCENT as u128 / 100;
+        assert_eq!(slash, 5_000 * 10u128.pow(18));
+
+        // Reporter reward: 10% of slashed
+        let reward = slash * REPORTER_REWARD_PERCENT as u128 / 100;
+        assert_eq!(reward, 500 * 10u128.pow(18));
+    }
+
+    #[test]
+    fn test_validator_slashing_info_default() {
+        let info = ValidatorSlashingInfo::default();
+        assert!(!info.jailed);
+        assert_eq!(info.jailed_until, 0);
+        assert_eq!(info.total_slashed, 0);
+        assert!(info.slashing_history.is_empty());
+    }
 }

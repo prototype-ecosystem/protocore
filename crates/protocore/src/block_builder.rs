@@ -276,6 +276,8 @@ impl<S: BlockBuilderStorage, A: AccountStateProvider> BlockBuilder<S, A> {
             gas_used,
             base_fee,
             last_finality_cert_hash: parent.header.last_finality_cert_hash,
+            validator_set_hash: parent.header.validator_set_hash,
+            next_validator_set_hash: None,
         };
 
         let block = Block {
@@ -697,6 +699,8 @@ impl<S: BlockBuilderStorage, A: AccountStateProvider> BlockBuilder<S, A> {
             gas_used: 0,
             base_fee: self.calculate_base_fee(&parent, 0),
             last_finality_cert_hash: parent.header.last_finality_cert_hash,
+            validator_set_hash: parent.header.validator_set_hash,
+            next_validator_set_hash: None,
         };
 
         Ok(Block {

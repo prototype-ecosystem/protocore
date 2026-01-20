@@ -37,10 +37,22 @@
 #![deny(unsafe_code)]
 
 pub mod pool;
+pub mod rate_limiter;
+pub mod relay_incentives;
 pub mod validation;
 
 // Re-export main types at crate root
-pub use pool::{Mempool, MempoolConfig, PendingTransaction, TransactionStatus};
+pub use pool::{
+    DedupCacheStats, Mempool, MempoolConfig, MempoolStats, PendingTransaction,
+    TransactionDeduplicationCache, TransactionStatus,
+};
+pub use rate_limiter::{
+    MempoolRateLimiter, RateLimitConfig, RateLimitRejectReason, RateLimitResult, RateLimiterStats,
+};
+pub use relay_incentives::{
+    FeeDistribution, OriginClaim, RelayIncentivesConfig, RelayIncentivesStats,
+    RelayIncentivesTracker, RelayInfo, RelayRegistry,
+};
 pub use validation::{
     AccountStateProvider, MockAccountState, TransactionValidator, ValidationConfig,
     ValidationError, ValidationResult,

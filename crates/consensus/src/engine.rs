@@ -32,12 +32,14 @@ use parking_lot::RwLock;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
 
+use crate::state_machine::{ConsensusEvent, ConsensusStateMachine, StateMachineError, VotePhase};
 use crate::timeout::{TimeoutConfig, TimeoutInfo, TimeoutScheduler};
 use crate::types::{
     CommittedBlock, ConsensusMessage, FinalityCert, Proposal, Step, ValidatorId, ValidatorSet,
     Vote, VoteType, NIL_HASH,
 };
 use crate::vote_set::{HeightVoteSet, VoteSet, VoteSetError};
+use crate::wal::{ConsensusWal, WalConfig, WalError};
 
 /// Errors that can occur during consensus operations
 #[derive(Debug, thiserror::Error)]
@@ -69,6 +71,23 @@ pub enum ConsensusError {
     /// Invalid signature
     #[error("invalid signature")]
     InvalidSignature,
+
+    /// State machine error (invalid transition, safety violation, etc.)
+    #[error("state machine error: {0}")]
+    StateMachineError(#[from] StateMachineError),
+
+    /// WAL error (persistence/recovery failure)
+    #[error("WAL error: {0}")]
+    WalError(#[from] WalError),
+
+    /// Equivocation attempt detected (safety critical)
+    #[error("equivocation attempt at height {height}, round {round}: already signed different value")]
+    EquivocationAttempt {
+        /// Block height
+        height: u64,
+        /// Consensus round
+        round: u64,
+    },
 }
 
 /// Trait for block validation (implemented by EVM executor)
@@ -112,7 +131,7 @@ impl ConsensusState {
         Self {
             height: 1,
             round: 0,
-            step: Step::Propose,
+            step: Step::NewHeight,
             locked_value: None,
             locked_round: -1,
             valid_value: None,
@@ -124,7 +143,7 @@ impl ConsensusState {
     pub fn reset_for_height(&mut self, height: u64) {
         self.height = height;
         self.round = 0;
-        self.step = Step::Propose;
+        self.step = Step::NewHeight;
         self.locked_value = None;
         self.locked_round = -1;
         self.valid_value = None;
@@ -154,6 +173,9 @@ pub struct ConsensusEngine<V: BlockValidator, B: BlockBuilder> {
     /// Current consensus state
     state: RwLock<ConsensusState>,
 
+    /// Formal state machine for transition validation
+    state_machine: RwLock<ConsensusStateMachine>,
+
     /// Vote tracking for current height
     height_votes: RwLock<HeightVoteSet>,
 
@@ -180,6 +202,9 @@ pub struct ConsensusEngine<V: BlockValidator, B: BlockBuilder> {
 
     /// Channel to send committed blocks
     commit_tx: mpsc::Sender<CommittedBlock>,
+
+    /// Write-Ahead Log for consensus state persistence (optional)
+    wal: Option<Arc<ConsensusWal>>,
 }
 
 impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
@@ -202,6 +227,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
             validator_id,
             private_key,
             state: RwLock::new(state),
+            state_machine: RwLock::new(ConsensusStateMachine::new()),
             height_votes: RwLock::new(height_votes),
             proposals: RwLock::new(HashMap::new()),
             validator_set: RwLock::new(validator_set),
@@ -211,12 +237,102 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
             block_builder,
             network_tx,
             commit_tx,
+            wal: None,
         }
+    }
+
+    /// Create a new consensus engine with WAL enabled
+    ///
+    /// The WAL provides crash recovery and anti-equivocation guarantees.
+    /// All signing operations will be persisted to the WAL before execution.
+    pub fn with_wal(
+        validator_id: ValidatorId,
+        private_key: BlsPrivateKey,
+        validator_set: ValidatorSet,
+        timeout_config: TimeoutConfig,
+        block_validator: Arc<V>,
+        block_builder: Arc<B>,
+        network_tx: mpsc::Sender<ConsensusMessage>,
+        commit_tx: mpsc::Sender<CommittedBlock>,
+        timeout_tx: mpsc::Sender<TimeoutInfo>,
+        wal_config: WalConfig,
+    ) -> Result<Self, WalError> {
+        let wal = ConsensusWal::open(wal_config)?;
+        let recovered = wal.recovered_state();
+
+        // Initialize state from WAL if available
+        let mut state = ConsensusState::new();
+        if recovered.last_height > 0 {
+            state.height = recovered.last_height;
+            // Restore locked state if any
+            if let (Some(_locked_hash), Some(locked_round)) =
+                (recovered.locked_value, recovered.locked_round)
+            {
+                state.locked_round = locked_round as i64;
+                // Note: We don't restore locked_value (Block) here because we only
+                // stored the hash. The actual block will need to be re-fetched from
+                // storage if needed. For safety, we keep the locked_round to prevent
+                // voting against the locked value.
+            }
+            info!(
+                height = recovered.last_height,
+                committed = recovered.committed_height,
+                "Recovered consensus state from WAL"
+            );
+        }
+
+        let height_votes = HeightVoteSet::new(state.height);
+
+        Ok(Self {
+            validator_id,
+            private_key,
+            state: RwLock::new(state),
+            state_machine: RwLock::new(ConsensusStateMachine::new()),
+            height_votes: RwLock::new(height_votes),
+            proposals: RwLock::new(HashMap::new()),
+            validator_set: RwLock::new(validator_set),
+            parent_hash: RwLock::new([0u8; 32]),
+            timeout_scheduler: TimeoutScheduler::new(timeout_config, timeout_tx),
+            block_validator,
+            block_builder,
+            network_tx,
+            commit_tx,
+            wal: Some(Arc::new(wal)),
+        })
+    }
+
+    /// Set the WAL after construction
+    pub fn set_wal(&mut self, wal: Arc<ConsensusWal>) {
+        self.wal = Some(wal);
+    }
+
+    /// Get a reference to the WAL (if enabled)
+    pub fn wal(&self) -> Option<&Arc<ConsensusWal>> {
+        self.wal.as_ref()
     }
 
     /// Start consensus at a specific height
     pub async fn start(&self, height: u64, parent_hash: Hash) {
         info!(height = height, "Starting consensus");
+
+        // Write height start to WAL BEFORE any other operations
+        if let Some(wal) = &self.wal {
+            if let Err(e) = wal.write_height_start(height, parent_hash) {
+                error!(height = height, error = %e, "Failed to write height start to WAL");
+                return;
+            }
+        }
+
+        // Initialize the formal state machine
+        {
+            let mut sm = self.state_machine.write();
+            sm.initialize(height);
+            // Apply NewHeight event
+            if let Err(e) = sm.apply_event(ConsensusEvent::NewHeight { height }) {
+                error!(height = height, error = %e, "Failed to apply NewHeight event");
+                return;
+            }
+        }
 
         {
             let mut state = self.state.write();
@@ -239,6 +355,20 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
     pub fn enter_round(&self, height: u64, round: u64) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             info!(height = height, round = round, "Entering round");
+
+            // Validate transition using the formal state machine
+            {
+                let mut sm = self.state_machine.write();
+                if let Err(e) = sm.apply_event(ConsensusEvent::StartRound { height, round }) {
+                    error!(
+                        height = height,
+                        round = round,
+                        error = %e,
+                        "Invalid state transition to round"
+                    );
+                    return;
+                }
+            }
 
             // Update state
             {
@@ -290,6 +420,35 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         };
 
         let block_hash = block.hash();
+        let block_hash_arr: [u8; 32] = block_hash.into();
+
+        // Write proposal to WAL BEFORE signing (anti-equivocation)
+        if let Some(wal) = &self.wal {
+            // Check if we've already signed a different proposal for this round
+            if let Some(existing_hash) = wal.get_signed_proposal(height, round) {
+                if existing_hash != block_hash_arr {
+                    error!(
+                        height = height,
+                        round = round,
+                        existing = hex::encode(&existing_hash[..8]),
+                        attempted = hex::encode(&block_hash_arr[..8]),
+                        "CRITICAL: Attempted to sign different proposal - equivocation prevented"
+                    );
+                    return;
+                }
+                // Same hash, we can proceed (idempotent)
+            }
+
+            if let Err(e) = wal.write_proposal_signed(height, round, block_hash_arr, valid_round) {
+                error!(
+                    height = height,
+                    round = round,
+                    error = %e,
+                    "Failed to write proposal to WAL - refusing to sign"
+                );
+                return;
+            }
+        }
 
         // Create and sign proposal
         let mut proposal = Proposal::new(height, round, block, valid_round);
@@ -458,6 +617,53 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
             return;
         }
 
+        // Check if we already voted in this round (equivocation prevention via state machine)
+        {
+            let sm = self.state_machine.read();
+            if sm.has_voted(height, round, VotePhase::Prevote) {
+                warn!(
+                    height = height,
+                    round = round,
+                    "Already voted in this round, skipping prevote"
+                );
+                return;
+            }
+        }
+
+        // Write vote to WAL BEFORE signing (anti-equivocation)
+        if let Some(wal) = &self.wal {
+            // Check if we've already signed a different vote for this position
+            if let Some(existing_hash) = wal.get_signed_vote(height, round, VoteType::Prevote) {
+                if existing_hash != block_hash {
+                    error!(
+                        height = height,
+                        round = round,
+                        existing = if existing_hash == NIL_HASH { "NIL".to_string() } else { hex::encode(&existing_hash[..8]) },
+                        attempted = if block_hash == NIL_HASH { "NIL".to_string() } else { hex::encode(&block_hash[..8]) },
+                        "CRITICAL: Attempted to sign different prevote - equivocation prevented"
+                    );
+                    return;
+                }
+                // Same hash, we can proceed (idempotent) but check state machine too
+            }
+
+            if let Err(e) = wal.write_vote_signed(height, round, VoteType::Prevote, block_hash) {
+                error!(
+                    height = height,
+                    round = round,
+                    error = %e,
+                    "Failed to write prevote to WAL - refusing to sign"
+                );
+                return;
+            }
+        }
+
+        // Record vote in state machine
+        {
+            let mut sm = self.state_machine.write();
+            sm.record_vote(height, round, VotePhase::Prevote);
+        }
+
         // Update step
         {
             let mut state = self.state.write();
@@ -597,6 +803,19 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
             if let Some(p) = proposal {
                 let p_hash: [u8; 32] = p.block.hash().into();
                 if p_hash == block_hash {
+                    // Write lock to WAL BEFORE updating state
+                    if let Some(wal) = &self.wal {
+                        if let Err(e) = wal.write_locked(height, round, block_hash) {
+                            error!(
+                                height = height,
+                                round = round,
+                                error = %e,
+                                "Failed to write lock to WAL"
+                            );
+                            // Continue anyway - locking is for safety, but we can still precommit
+                        }
+                    }
+
                     let mut state = self.state.write();
                     state.locked_value = Some(p.block.clone());
                     state.locked_round = round as i64;
@@ -628,6 +847,53 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
 
         if step != Step::Prevote {
             return;
+        }
+
+        // Check if we already precommitted in this round (equivocation prevention via state machine)
+        {
+            let sm = self.state_machine.read();
+            if sm.has_voted(height, round, VotePhase::Precommit) {
+                warn!(
+                    height = height,
+                    round = round,
+                    "Already precommitted in this round, skipping"
+                );
+                return;
+            }
+        }
+
+        // Write vote to WAL BEFORE signing (anti-equivocation)
+        if let Some(wal) = &self.wal {
+            // Check if we've already signed a different precommit for this position
+            if let Some(existing_hash) = wal.get_signed_vote(height, round, VoteType::Precommit) {
+                if existing_hash != block_hash {
+                    error!(
+                        height = height,
+                        round = round,
+                        existing = if existing_hash == NIL_HASH { "NIL".to_string() } else { hex::encode(&existing_hash[..8]) },
+                        attempted = if block_hash == NIL_HASH { "NIL".to_string() } else { hex::encode(&block_hash[..8]) },
+                        "CRITICAL: Attempted to sign different precommit - equivocation prevented"
+                    );
+                    return;
+                }
+                // Same hash, we can proceed (idempotent)
+            }
+
+            if let Err(e) = wal.write_vote_signed(height, round, VoteType::Precommit, block_hash) {
+                error!(
+                    height = height,
+                    round = round,
+                    error = %e,
+                    "Failed to write precommit to WAL - refusing to sign"
+                );
+                return;
+            }
+        }
+
+        // Record this precommit vote in state machine
+        {
+            let mut sm = self.state_machine.write();
+            sm.record_vote(height, round, VotePhase::Precommit);
         }
 
         // Update step
@@ -694,11 +960,55 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
 
     /// Commit a finalized block
     async fn commit(&self, block: Block, round: u64) {
+        let block_hash: [u8; 32] = block.hash().into();
+
         let height = {
             let mut state = self.state.write();
             state.step = Step::Commit;
             state.height
         };
+
+        // Write commit to WAL
+        if let Some(wal) = &self.wal {
+            if let Err(e) = wal.write_committed(height, block_hash) {
+                error!(
+                    height = height,
+                    error = %e,
+                    "Failed to write commit to WAL"
+                );
+                // Continue anyway - commit has already happened
+            }
+
+            // Prune old WAL entries if configured
+            let max_retained = wal.config().max_heights_retained;
+            if max_retained > 0 && height > max_retained {
+                let prune_below = height.saturating_sub(max_retained);
+                if let Err(e) = wal.prune(prune_below) {
+                    warn!(
+                        height = height,
+                        prune_below = prune_below,
+                        error = %e,
+                        "Failed to prune WAL"
+                    );
+                }
+            }
+        }
+
+        // Record commit in state machine for safety tracking (prevents conflicting commits)
+        {
+            let mut sm = self.state_machine.write();
+            if let Err(e) = sm.apply_event(ConsensusEvent::BlockCommitted {
+                height,
+                block_hash,
+            }) {
+                error!(
+                    height = height,
+                    error = %e,
+                    "CRITICAL: Failed to record commit in state machine - potential safety violation"
+                );
+                // Continue anyway since the block was already committed by consensus
+            }
+        }
 
         // Cancel all timeouts
         self.timeout_scheduler.cancel_all();
@@ -709,7 +1019,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         info!(
             height = height,
             round = round,
-            block_hash = hex::encode(&block.hash().as_bytes()[..8]),
+            block_hash = hex::encode(&block_hash[..8]),
             signers = finality_cert.signer_count(),
             "COMMITTED block"
         );
@@ -777,6 +1087,13 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         }
 
         match timeout.step {
+            Step::NewHeight => {
+                // NewHeight timeout should not occur in normal operation
+                warn!(
+                    height = height,
+                    "Unexpected NewHeight timeout"
+                );
+            }
             Step::Propose => {
                 if step == Step::Propose {
                     debug!(
@@ -828,13 +1145,137 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
     }
 
     /// Update the validator set (for epoch transitions)
+    ///
+    /// **Important**: This should only be called at epoch boundaries. The caller
+    /// is responsible for:
+    /// 1. Computing the new validator set from staking state
+    /// 2. Ensuring the transition happens at the correct block height
+    /// 3. Ensuring all nodes transition at the same block
+    ///
+    /// See the `epoch` module for epoch management utilities.
     pub fn set_validator_set(&self, validator_set: ValidatorSet) {
+        let old_count = self.validator_set.read().len();
+        let new_count = validator_set.len();
+        let new_hash = validator_set.compute_hash();
+
+        info!(
+            old_validator_count = old_count,
+            new_validator_count = new_count,
+            new_validator_set_hash = hex::encode(&new_hash[..8]),
+            "Updating validator set for epoch transition"
+        );
+
         *self.validator_set.write() = validator_set;
+    }
+
+    /// Update the validator set with epoch transition tracking
+    ///
+    /// This is the preferred method for epoch transitions as it validates
+    /// that our validator ID is still valid in the new set.
+    ///
+    /// Returns an error if this validator is not in the new set.
+    pub fn transition_validator_set(
+        &self,
+        new_validator_set: ValidatorSet,
+        new_epoch: u64,
+    ) -> Result<(), ConsensusError> {
+        // Check if we're still a validator in the current set
+        let our_address = {
+            let current_set = self.validator_set.read();
+            current_set
+                .get_validator(self.validator_id)
+                .map(|v| v.address)
+        };
+
+        let our_address = our_address.ok_or_else(|| {
+            ConsensusError::InvalidVote(crate::vote_set::VoteSetError::InvalidValidator(
+                self.validator_id,
+            ))
+        })?;
+
+        // Find our new validator ID in the new set (it may have changed)
+        let new_id = new_validator_set.get_by_address(&our_address).map(|v| v.id);
+
+        let new_hash = new_validator_set.compute_hash();
+
+        info!(
+            new_epoch = new_epoch,
+            old_validator_id = self.validator_id,
+            new_validator_id = ?new_id,
+            validator_count = new_validator_set.len(),
+            validator_set_hash = hex::encode(&new_hash[..8]),
+            "Transitioning to new epoch validator set"
+        );
+
+        // Log if we're no longer a validator
+        if new_id.is_none() {
+            warn!(
+                our_address = hex::encode(&our_address),
+                new_epoch = new_epoch,
+                "This node is no longer a validator in the new epoch"
+            );
+        }
+
+        *self.validator_set.write() = new_validator_set;
+
+        Ok(())
+    }
+
+    /// Checks if this node is an active validator in the current set
+    pub fn is_active_validator(&self) -> bool {
+        let vs = self.validator_set.read();
+        vs.get_validator(self.validator_id)
+            .map(|v| v.active)
+            .unwrap_or(false)
+    }
+
+    /// Checks if a given validator ID is in the current set
+    pub fn is_validator_in_current_set(&self, id: ValidatorId) -> bool {
+        self.validator_set.read().get_validator(id).is_some()
+    }
+
+    /// Gets the current validator set hash
+    pub fn current_validator_set_hash(&self) -> protocore_crypto::Hash {
+        self.validator_set.read().compute_hash()
+    }
+
+    /// Gets the current validator set (cloned)
+    pub fn current_validator_set(&self) -> ValidatorSet {
+        self.validator_set.read().clone()
     }
 
     /// Get our validator ID
     pub fn validator_id(&self) -> ValidatorId {
         self.validator_id
+    }
+
+    /// Get a snapshot of the formal state machine for debugging/monitoring
+    pub fn state_machine_snapshot(&self) -> crate::state_machine::StateMachineSnapshot {
+        self.state_machine.read().snapshot()
+    }
+
+    /// Verify that all safety invariants hold
+    ///
+    /// Returns Ok(()) if all safety properties are satisfied, or an error describing
+    /// the first violation found.
+    pub fn verify_safety(&self) -> Result<(), StateMachineError> {
+        self.state_machine.read().verify_safety_invariants()
+    }
+
+    /// Check if a block has already been committed at a given height
+    ///
+    /// This is used to detect potential conflicting commits (safety violation).
+    pub fn get_committed_block_hash(&self, height: u64) -> Option<Hash> {
+        self.state_machine
+            .read()
+            .commit_history()
+            .get_commit(height)
+            .copied()
+    }
+
+    /// Get the highest committed height
+    pub fn highest_committed_height(&self) -> u64 {
+        self.state_machine.read().commit_history().highest_height()
     }
 }
 

@@ -80,10 +80,11 @@ fn test_vote_signing_bytes() {
     let vote = Vote::new(VoteType::Prevote, 100, 2, [1u8; 32], 5);
     let bytes = vote.signing_bytes();
 
-    // Should be: domain (21) + height (8) + round (8) + block_hash (32) = 69 bytes
+    // Should be: domain (20) + chain_context (40) + height (8) + round (8) + block_hash (32) = 108 bytes
     // Domain separators prevent cross-protocol signature replay attacks
+    // Chain context prevents cross-chain and cross-fork replay attacks
     // Note: The domain implicitly encodes the vote type, so vote_type byte is not separately included
-    let expected_len = domains::PREVOTE.len() + 8 + 8 + 32;
+    let expected_len = domains::PREVOTE.len() + 40 + 8 + 8 + 32;
     assert_eq!(bytes.len(), expected_len);
 
     // Verify domain prefix is correct

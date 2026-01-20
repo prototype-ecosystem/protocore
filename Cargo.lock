@@ -4459,9 +4459,24 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sha3",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "protocore-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bs58",
+ "bytes",
+ "futures",
+ "serde",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -4493,6 +4508,8 @@ dependencies = [
  "k256",
  "num_cpus",
  "parking_lot",
+ "protocore-consensus",
+ "protocore-crypto",
  "protocore-storage",
  "protocore-types",
  "rand 0.8.5",
@@ -4547,6 +4564,7 @@ dependencies = [
  "futures",
  "instant",
  "libp2p 0.54.1",
+ "parking_lot",
  "protocore-consensus",
  "protocore-types",
  "rand 0.8.5",
@@ -4609,6 +4627,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "bytes",
+ "hex",
  "parking_lot",
  "rand 0.8.5",
  "rocksdb",

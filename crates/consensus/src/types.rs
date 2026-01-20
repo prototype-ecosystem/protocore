@@ -12,6 +12,7 @@
 use protocore_crypto::{bls::{BlsPublicKey, BlsSignature}, Hash};
 use protocore_types::{Block, H256};
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Keccak256};
 
 /// Unique identifier for a validator (index in validator set)
 pub type ValidatorId = u64;
@@ -34,9 +35,62 @@ pub mod domains {
     pub const FINALITY_CERT: &[u8] = b"PROTOCORE_FINALITY_V1";
 }
 
-/// Consensus step within a round
+/// Chain context for replay protection across chains and forks
+///
+/// This context is included in consensus message signing to prevent:
+/// 1. Cross-chain replay attacks (same message valid on different chains)
+/// 2. Cross-fork replay attacks (same message valid after a fork)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ChainContext {
+    /// Chain ID (prevents cross-chain replay)
+    pub chain_id: u64,
+    /// Genesis block hash (prevents cross-fork replay)
+    pub genesis_hash: Hash,
+}
+
+impl ChainContext {
+    /// Create a new chain context
+    pub const fn new(chain_id: u64, genesis_hash: Hash) -> Self {
+        Self { chain_id, genesis_hash }
+    }
+
+    /// Create chain context for testnet (default genesis)
+    pub fn testnet() -> Self {
+        Self {
+            chain_id: 31337,
+            genesis_hash: [0u8; 32],
+        }
+    }
+
+    /// Encode the chain context to bytes for inclusion in signing data
+    pub fn to_bytes(&self) -> [u8; 40] {
+        let mut bytes = [0u8; 40];
+        bytes[0..8].copy_from_slice(&self.chain_id.to_le_bytes());
+        bytes[8..40].copy_from_slice(&self.genesis_hash);
+        bytes
+    }
+}
+
+impl Default for ChainContext {
+    fn default() -> Self {
+        Self::testnet()
+    }
+}
+
+/// Consensus step within a round
+///
+/// The consensus state machine progresses through these steps:
+/// ```text
+/// NewHeight -> Propose -> Prevote -> Precommit -> Commit -> NewHeight
+///                  ^                      |
+///                  |______________________|
+///                     (round timeout)
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum Step {
+    /// Waiting to start a new height (initial state or after commit)
+    #[default]
+    NewHeight,
     /// Proposer creates and broadcasts a block proposal
     Propose,
     /// Validators vote on whether the proposal is valid
@@ -47,9 +101,55 @@ pub enum Step {
     Commit,
 }
 
+impl Step {
+    /// Returns true if this step can transition to the target step
+    #[must_use]
+    pub fn can_transition_to(&self, target: Step) -> bool {
+        matches!(
+            (self, target),
+            // Normal forward progression within a round
+            (Step::NewHeight, Step::Propose)
+                | (Step::Propose, Step::Prevote)
+                | (Step::Prevote, Step::Precommit)
+                | (Step::Precommit, Step::Commit)
+                // After commit, start new height
+                | (Step::Commit, Step::NewHeight)
+                // Round timeout: can go back to Propose for new round
+                | (Step::Precommit, Step::Propose)
+                // Can also timeout during Prevote to move to next round
+                | (Step::Prevote, Step::Propose)
+        )
+    }
+
+    /// Returns all valid transitions from this step
+    #[must_use]
+    pub fn valid_transitions(&self) -> &'static [Step] {
+        match self {
+            Step::NewHeight => &[Step::Propose],
+            Step::Propose => &[Step::Prevote],
+            Step::Prevote => &[Step::Precommit, Step::Propose], // Propose for round timeout
+            Step::Precommit => &[Step::Commit, Step::Propose],  // Propose for round timeout
+            Step::Commit => &[Step::NewHeight],
+        }
+    }
+
+    /// Returns true if this is a terminal step for a round
+    #[must_use]
+    pub fn is_round_terminal(&self) -> bool {
+        matches!(self, Step::Commit)
+    }
+
+    /// Returns true if this step allows voting
+    #[must_use]
+    pub fn is_voting_step(&self) -> bool {
+        matches!(self, Step::Prevote | Step::Precommit)
+    }
+}
+
 impl std::fmt::Display for Step {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Step::NewHeight => write!(f, "NewHeight"),
             Step::Propose => write!(f, "Propose"),
             Step::Prevote => write!(f, "Prevote"),
             Step::Precommit => write!(f, "Precommit"),
@@ -105,13 +205,27 @@ impl Proposal {
         }
     }
 
-    /// Get the signing bytes for this proposal
+    /// Get the signing bytes for this proposal (without chain context)
     ///
     /// Includes domain separator to prevent cross-context signature replay.
+    /// For production use, prefer `signing_bytes_with_context` which includes
+    /// chain_id and genesis_hash for cross-chain/cross-fork protection.
     pub fn signing_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(domains::PROPOSAL.len() + 48);
+        self.signing_bytes_with_context(&ChainContext::default())
+    }
+
+    /// Get the signing bytes for this proposal with chain context
+    ///
+    /// Includes:
+    /// - Domain separator (prevents cross-context replay)
+    /// - Chain ID and genesis hash (prevents cross-chain/cross-fork replay)
+    /// - Height and round (prevents replay within the same chain)
+    pub fn signing_bytes_with_context(&self, ctx: &ChainContext) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(domains::PROPOSAL.len() + 88);
         // Domain separator prefix
         bytes.extend(domains::PROPOSAL);
+        // Chain context (chain_id + genesis_hash)
+        bytes.extend(&ctx.to_bytes());
         // Message content
         bytes.extend(&self.height.to_le_bytes());
         bytes.extend(&self.round.to_le_bytes());
@@ -162,18 +276,32 @@ impl Vote {
         }
     }
 
-    /// Get the signing bytes for this vote
+    /// Get the signing bytes for this vote (without chain context)
     ///
     /// Includes domain separator (PREVOTE or PRECOMMIT) to prevent cross-context
     /// signature replay. A prevote signature cannot be reused as a precommit.
+    /// For production use, prefer `signing_bytes_with_context` which includes
+    /// chain_id and genesis_hash for cross-chain/cross-fork protection.
     pub fn signing_bytes(&self) -> Vec<u8> {
+        self.signing_bytes_with_context(&ChainContext::default())
+    }
+
+    /// Get the signing bytes for this vote with chain context
+    ///
+    /// Includes:
+    /// - Domain separator PREVOTE/PRECOMMIT (prevents cross-context replay)
+    /// - Chain ID and genesis hash (prevents cross-chain/cross-fork replay)
+    /// - Height and round (prevents replay within the same chain)
+    pub fn signing_bytes_with_context(&self, ctx: &ChainContext) -> Vec<u8> {
         let domain = match self.vote_type {
             VoteType::Prevote => domains::PREVOTE,
             VoteType::Precommit => domains::PRECOMMIT,
         };
-        let mut bytes = Vec::with_capacity(domain.len() + 49);
+        let mut bytes = Vec::with_capacity(domain.len() + 89);
         // Domain separator prefix (includes vote type implicitly)
         bytes.extend(domain);
+        // Chain context (chain_id + genesis_hash)
+        bytes.extend(&ctx.to_bytes());
         // Message content
         bytes.extend(&self.height.to_le_bytes());
         bytes.extend(&self.round.to_le_bytes());
@@ -346,6 +474,47 @@ impl ValidatorSet {
             validators,
             total_stake,
         }
+    }
+
+    /// Computes the hash of this validator set for light client verification
+    ///
+    /// The hash is computed as:
+    /// ```text
+    /// keccak256(
+    ///     validator_count ||
+    ///     total_stake ||
+    ///     for each validator (sorted by id):
+    ///         id || pubkey || address || stake || commission || active
+    /// )
+    /// ```
+    pub fn compute_hash(&self) -> Hash {
+        let mut hasher = Keccak256::new();
+
+        // Include validator count
+        hasher.update(&(self.len() as u64).to_le_bytes());
+
+        // Include total stake for quorum verification
+        hasher.update(&self.total_stake.to_le_bytes());
+
+        // Include each validator's data (validators are already sorted by id)
+        for validator in &self.validators {
+            hasher.update(&validator.id.to_le_bytes());
+            hasher.update(&validator.pubkey.to_bytes());
+            hasher.update(&validator.address);
+            hasher.update(&validator.stake.to_le_bytes());
+            hasher.update(&validator.commission.to_le_bytes());
+            hasher.update(&[validator.active as u8]);
+        }
+
+        let result = hasher.finalize();
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&result);
+        hash
+    }
+
+    /// Computes the hash as an H256 type
+    pub fn compute_hash_h256(&self) -> H256 {
+        H256::from(self.compute_hash())
     }
 
     /// Get the proposer for a given height and round

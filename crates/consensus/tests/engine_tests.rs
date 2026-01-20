@@ -75,7 +75,8 @@ fn test_consensus_state_new() {
     let state = ConsensusState::new();
     assert_eq!(state.height, 1);
     assert_eq!(state.round, 0);
-    assert_eq!(state.step, Step::Propose);
+    // Default step is NewHeight (initial state before consensus starts)
+    assert_eq!(state.step, Step::NewHeight);
     assert!(state.locked_value.is_none());
     assert_eq!(state.locked_round, -1);
 }

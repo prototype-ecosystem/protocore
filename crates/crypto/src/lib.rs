@@ -34,7 +34,11 @@ pub mod schnorr;
 pub mod vrf;
 
 // Re-export commonly used items
-pub use bls::{BlsPrivateKey, BlsPublicKey, BlsSignature};
+pub use bls::{
+    BlsPrivateKey, BlsPublicKey, BlsSignature, BlsProofOfPossession,
+    DomainTag, MessageType, ValidatorKeyPair,
+    aggregate_sorted_with_domain, verify_proof_of_possession, batch_verify_proofs_of_possession,
+};
 pub use ecdsa::{Address, PrivateKey, PublicKey, Signature};
 pub use hash::{keccak256, keccak256_concat, Hasher};
 pub use schnorr::{batch_verify, SchnorrPublicKey, SchnorrSecretKey, SchnorrSignature};

@@ -83,6 +83,7 @@
 #![deny(unsafe_code)]
 
 pub mod chunks;
+pub mod multi_peer;
 pub mod provider;
 pub mod snapshot;
 pub mod sync;
@@ -90,6 +91,10 @@ pub mod sync;
 // Re-export main types at crate root
 pub use chunks::{
     ChunkDownloader, ChunkId, ChunkRequest, ChunkResponse, ChunkVerifier, StateChunk,
+};
+pub use multi_peer::{
+    ChunkAssigner, ChunkProgress, DownloadPipeline, DownloadRequest, DownloadResult,
+    MultiPeerConfig, PeerMetrics, PeerScorer, PeerScorerStats,
 };
 pub use provider::{SnapshotProvider, SnapshotProviderConfig};
 pub use snapshot::{

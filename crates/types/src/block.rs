@@ -19,6 +19,7 @@ use std::fmt;
 /// - State commitments (state_root, transactions_root, receipts_root)
 /// - Execution context (gas_limit, gas_used, base_fee)
 /// - Consensus data (proposer, timestamp, last_finality_cert)
+/// - Validator set data (validator_set_hash, next_validator_set_hash)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockHeader {
     /// Chain identifier (prevents cross-chain replay)
@@ -46,6 +47,18 @@ pub struct BlockHeader {
     /// Hash of the finality certificate for the previous block
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_finality_cert_hash: Option<H256>,
+    /// Hash of the current validator set for this block's epoch
+    ///
+    /// This enables light clients to verify that votes came from the correct
+    /// validator set without downloading the full validator list.
+    pub validator_set_hash: H256,
+    /// Hash of the next epoch's validator set (only set at epoch boundaries)
+    ///
+    /// When a block is at an epoch boundary (last block of an epoch), this field
+    /// contains the hash of the validator set that will be active in the next epoch.
+    /// Light clients use this to follow validator set transitions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_validator_set_hash: Option<H256>,
 }
 
 impl Default for BlockHeader {
@@ -63,6 +76,8 @@ impl Default for BlockHeader {
             gas_used: 0,
             base_fee: 1_000_000_000, // 1 gwei
             last_finality_cert_hash: None,
+            validator_set_hash: H256::NIL,
+            next_validator_set_hash: None,
         }
     }
 }
@@ -97,7 +112,7 @@ impl BlockHeader {
 
     /// RLP encodes the header.
     pub fn rlp_encode(&self) -> Vec<u8> {
-        let mut stream = RlpStream::new_list(12);
+        let mut stream = RlpStream::new_list(14);
         stream.append(&self.chain_id);
         stream.append(&self.height);
         stream.append(&self.timestamp);
@@ -110,6 +125,11 @@ impl BlockHeader {
         stream.append(&self.gas_used);
         stream.append(&self.base_fee);
         match &self.last_finality_cert_hash {
+            Some(hash) => stream.append(hash),
+            None => stream.append(&""),
+        };
+        stream.append(&self.validator_set_hash);
+        match &self.next_validator_set_hash {
             Some(hash) => stream.append(hash),
             None => stream.append(&""),
         };
@@ -164,7 +184,50 @@ impl BlockHeader {
             gas_used: 0,
             base_fee: 1_000_000_000,
             last_finality_cert_hash: None,
+            validator_set_hash: H256::NIL,
+            next_validator_set_hash: None,
         }
+    }
+
+    /// Creates a genesis block header with a validator set hash.
+    pub fn genesis_with_validators(
+        chain_id: u64,
+        state_root: H256,
+        timestamp: u64,
+        validator_set_hash: H256,
+    ) -> Self {
+        Self {
+            chain_id,
+            height: 0,
+            timestamp,
+            parent_hash: H256::NIL,
+            transactions_root: H256::NIL,
+            state_root,
+            receipts_root: H256::NIL,
+            proposer: Address::ZERO,
+            gas_limit: 30_000_000,
+            gas_used: 0,
+            base_fee: 1_000_000_000,
+            last_finality_cert_hash: None,
+            validator_set_hash,
+            next_validator_set_hash: None,
+        }
+    }
+
+    /// Sets the validator set hashes
+    pub fn with_validator_set_hashes(
+        mut self,
+        validator_set_hash: H256,
+        next_validator_set_hash: Option<H256>,
+    ) -> Self {
+        self.validator_set_hash = validator_set_hash;
+        self.next_validator_set_hash = next_validator_set_hash;
+        self
+    }
+
+    /// Checks if this block is at an epoch boundary (has next validator set hash)
+    pub fn is_epoch_boundary(&self) -> bool {
+        self.next_validator_set_hash.is_some()
     }
 
     /// Sets the state roots.
@@ -212,7 +275,7 @@ impl BlockHeader {
 
 impl Encodable for BlockHeader {
     fn rlp_append(&self, s: &mut RlpStream) {
-        s.begin_list(12);
+        s.begin_list(14);
         s.append(&self.chain_id);
         s.append(&self.height);
         s.append(&self.timestamp);
@@ -228,12 +291,17 @@ impl Encodable for BlockHeader {
             Some(hash) => s.append(hash),
             None => s.append(&""),
         };
+        s.append(&self.validator_set_hash);
+        match &self.next_validator_set_hash {
+            Some(hash) => s.append(hash),
+            None => s.append(&""),
+        };
     }
 }
 
 impl Decodable for BlockHeader {
     fn decode(rlp: &Rlp<'_>) -> std::result::Result<Self, DecoderError> {
-        if rlp.item_count()? != 12 {
+        if rlp.item_count()? != 14 {
             return Err(DecoderError::RlpIncorrectListLen);
         }
 
@@ -242,6 +310,13 @@ impl Decodable for BlockHeader {
             None
         } else {
             Some(H256::from_slice(&cert_bytes).map_err(|_| DecoderError::RlpInvalidLength)?)
+        };
+
+        let next_vs_bytes: Vec<u8> = rlp.val_at(13)?;
+        let next_validator_set_hash = if next_vs_bytes.is_empty() {
+            None
+        } else {
+            Some(H256::from_slice(&next_vs_bytes).map_err(|_| DecoderError::RlpInvalidLength)?)
         };
 
         Ok(Self {
@@ -257,6 +332,8 @@ impl Decodable for BlockHeader {
             gas_used: rlp.val_at(9)?,
             base_fee: rlp.val_at(10)?,
             last_finality_cert_hash,
+            validator_set_hash: rlp.val_at(12)?,
+            next_validator_set_hash,
         })
     }
 }

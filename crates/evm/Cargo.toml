@@ -30,6 +30,8 @@ tracing = "0.1"
 # Local dependencies
 protocore-types = { path = "../types" }
 protocore-storage = { path = "../storage" }
+protocore-consensus = { path = "../consensus" }
+protocore-crypto = { path = "../crypto" }
 
 # Byte handling
 bytes = "1.5"

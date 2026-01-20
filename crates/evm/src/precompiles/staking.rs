@@ -56,6 +56,17 @@ pub const GAS_WITHDRAW: u64 = 30_000;
 pub const GAS_GET_VALIDATOR: u64 = 5_000;
 pub const GAS_GET_STAKE: u64 = 5_000;
 
+// Multi-validator delegation gas costs
+/// Base gas for batch delegation + per-validator cost
+pub const GAS_BATCH_DELEGATE_BASE: u64 = 30_000;
+pub const GAS_BATCH_DELEGATE_PER_VALIDATOR: u64 = 25_000;
+/// Gas for auto-rebalancing stake
+pub const GAS_AUTO_REBALANCE: u64 = 100_000;
+/// Gas for getting all delegations
+pub const GAS_GET_ALL_DELEGATIONS: u64 = 10_000;
+/// Maximum validators per batch operation
+pub const MAX_BATCH_VALIDATORS: usize = 10;
+
 /// Validator record stored in state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorRecord {
@@ -120,6 +131,49 @@ pub struct DelegationRecord {
     pub last_reward_height: u64,
 }
 
+/// Summary of all delegations for a user (used in multi-validator queries)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiDelegationSummary {
+    /// List of validators the user has delegated to
+    pub validators: Vec<Address>,
+    /// Amounts delegated to each validator (same order as validators)
+    pub amounts: Vec<u128>,
+    /// Pending rewards from each validator
+    pub rewards: Vec<u128>,
+    /// Total amount delegated across all validators
+    pub total_delegated: u128,
+    /// Total pending rewards
+    pub total_rewards: u128,
+}
+
+impl MultiDelegationSummary {
+    /// Create a new empty summary
+    pub fn new() -> Self {
+        Self {
+            validators: Vec::new(),
+            amounts: Vec::new(),
+            rewards: Vec::new(),
+            total_delegated: 0,
+            total_rewards: 0,
+        }
+    }
+
+    /// Add a delegation to the summary
+    pub fn add_delegation(&mut self, validator: Address, amount: u128, rewards: u128) {
+        self.validators.push(validator);
+        self.amounts.push(amount);
+        self.rewards.push(rewards);
+        self.total_delegated += amount;
+        self.total_rewards += rewards;
+    }
+}
+
+impl Default for MultiDelegationSummary {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Staking state stored in the EVM state trie
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StakingState {
@@ -180,6 +234,19 @@ impl StakingPrecompile {
             }
             staking_selectors::GET_STAKE => {
                 Self::get_stake(data, db)
+            }
+            // Multi-validator delegation functions
+            staking_selectors::BATCH_DELEGATE => {
+                Self::batch_delegate(caller, data, value, block_number, db)
+            }
+            staking_selectors::SPLIT_DELEGATE => {
+                Self::split_delegate(caller, data, value, block_number, db)
+            }
+            staking_selectors::GET_ALL_DELEGATIONS => {
+                Self::get_all_delegations(data, db)
+            }
+            staking_selectors::AUTO_REBALANCE => {
+                Self::auto_rebalance(caller, data, block_number, db)
             }
             _ => Err(PrecompileError::UnknownSelector { selector }),
         }
@@ -706,6 +773,462 @@ impl StakingPrecompile {
         output.extend_from_slice(&abi::encode_u256(U256::from(total_unbonding)));
 
         Ok(PrecompileOutput::new(Bytes::from(output), GAS_GET_STAKE))
+    }
+
+    // ==============================
+    // Multi-Validator Delegation Functions
+    // ==============================
+
+    /// Batch delegate to multiple validators with specific amounts
+    ///
+    /// Input format: validators (address[]) + amounts (uint256[])
+    /// The msg.value must equal the sum of amounts
+    fn batch_delegate<DB: Database>(
+        caller: Address,
+        data: &[u8],
+        value: U256,
+        block_number: u64,
+        db: &mut StateAdapter<DB>,
+    ) -> Result<PrecompileOutput, PrecompileError>
+    where
+        DB::Error: std::fmt::Debug,
+    {
+        info!(caller = %caller, value = %value, "Batch delegating to multiple validators");
+
+        // Parse validators array offset and amounts array offset
+        if data.len() < 64 {
+            return Err(PrecompileError::InvalidInput("insufficient data for batch delegate".into()));
+        }
+
+        // Decode arrays (simplified - assumes contiguous encoding)
+        let (validators, amounts) = Self::decode_batch_delegate_params(data)?;
+
+        if validators.len() != amounts.len() {
+            return Err(PrecompileError::InvalidInput("validators and amounts length mismatch".into()));
+        }
+
+        if validators.len() > MAX_BATCH_VALIDATORS {
+            return Err(PrecompileError::InvalidInput(
+                format!("too many validators: {} > {}", validators.len(), MAX_BATCH_VALIDATORS)
+            ));
+        }
+
+        // Verify total amount matches msg.value
+        let total_amount: u128 = amounts.iter().sum();
+        let msg_value = value.as_limbs()[0] as u128 | ((value.as_limbs()[1] as u128) << 64);
+        if total_amount != msg_value {
+            return Err(PrecompileError::InvalidInput(
+                format!("amounts sum ({}) doesn't match msg.value ({})", total_amount, msg_value)
+            ));
+        }
+
+        let mut state = Self::load_state(db)?;
+        let mut logs = Vec::new();
+
+        // Process each delegation
+        for (validator, amount) in validators.iter().zip(amounts.iter()) {
+            if *amount < MIN_DELEGATION {
+                return Err(PrecompileError::InsufficientStake {
+                    required: U256::from(MIN_DELEGATION),
+                    provided: U256::from(*amount),
+                });
+            }
+
+            // Check validator exists and is active
+            let val = state
+                .validators
+                .get_mut(validator)
+                .ok_or(PrecompileError::ValidatorNotFound(*validator))?;
+
+            if !val.active || val.jailed {
+                return Err(PrecompileError::ValidatorInactive(*validator));
+            }
+
+            // Update validator's total stake
+            val.total_stake += *amount;
+
+            // Update or create delegation record
+            let delegations = state.delegations.entry(caller).or_default();
+            let delegation = delegations.entry(*validator).or_insert(DelegationRecord {
+                amount: 0,
+                pending_rewards: 0,
+                last_reward_height: block_number,
+            });
+            delegation.amount += *amount;
+
+            logs.push(Self::create_delegated_event(caller, *validator, *amount));
+        }
+
+        // Update total stake
+        state.total_stake += total_amount;
+
+        Self::save_state(db, &state)?;
+
+        // Calculate gas: base + per-validator cost
+        let gas_used = GAS_BATCH_DELEGATE_BASE +
+            (validators.len() as u64 * GAS_BATCH_DELEGATE_PER_VALIDATOR);
+
+        debug!(
+            caller = %caller,
+            validators = validators.len(),
+            total_amount = total_amount,
+            "Batch delegation complete"
+        );
+
+        let mut output = PrecompileOutput::new(
+            Bytes::copy_from_slice(&abi::encode_u256(U256::from(total_amount))),
+            gas_used,
+        );
+        for log in logs {
+            output.add_log(log);
+        }
+        Ok(output)
+    }
+
+    /// Split delegate evenly among multiple validators
+    ///
+    /// Input format: validators (address[])
+    /// The msg.value is split evenly among validators, remainder goes to first validator
+    fn split_delegate<DB: Database>(
+        caller: Address,
+        data: &[u8],
+        value: U256,
+        block_number: u64,
+        db: &mut StateAdapter<DB>,
+    ) -> Result<PrecompileOutput, PrecompileError>
+    where
+        DB::Error: std::fmt::Debug,
+    {
+        info!(caller = %caller, value = %value, "Split delegating to validators");
+
+        let validators = Self::decode_address_array(data)?;
+
+        if validators.is_empty() {
+            return Err(PrecompileError::InvalidInput("no validators provided".into()));
+        }
+
+        if validators.len() > MAX_BATCH_VALIDATORS {
+            return Err(PrecompileError::InvalidInput(
+                format!("too many validators: {} > {}", validators.len(), MAX_BATCH_VALIDATORS)
+            ));
+        }
+
+        let total_amount = value.as_limbs()[0] as u128 | ((value.as_limbs()[1] as u128) << 64);
+        let per_validator = total_amount / validators.len() as u128;
+        let remainder = total_amount % validators.len() as u128;
+
+        if per_validator < MIN_DELEGATION {
+            return Err(PrecompileError::InsufficientStake {
+                required: U256::from(MIN_DELEGATION * validators.len() as u128),
+                provided: value,
+            });
+        }
+
+        // Build amounts array: first validator gets remainder
+        let amounts: Vec<u128> = validators
+            .iter()
+            .enumerate()
+            .map(|(i, _)| if i == 0 { per_validator + remainder } else { per_validator })
+            .collect();
+
+        // Encode as batch delegate params and delegate
+        Self::batch_delegate_internal(caller, &validators, &amounts, block_number, db)
+    }
+
+    /// Get all delegations for an address
+    fn get_all_delegations<DB: Database>(
+        data: &[u8],
+        db: &mut StateAdapter<DB>,
+    ) -> Result<PrecompileOutput, PrecompileError>
+    where
+        DB::Error: std::fmt::Debug,
+    {
+        let staker_addr = abi::decode_address(data, 0)
+            .ok_or_else(|| PrecompileError::InvalidInput("expected staker address".into()))?;
+
+        let state = Self::load_state(db)?;
+
+        let mut summary = MultiDelegationSummary::new();
+
+        if let Some(delegations) = state.delegations.get(&staker_addr) {
+            for (validator, record) in delegations {
+                summary.add_delegation(*validator, record.amount, record.pending_rewards);
+            }
+        }
+
+        // Encode response: total_delegated, total_rewards, count, then arrays
+        let mut output = Vec::new();
+        output.extend_from_slice(&abi::encode_u256(U256::from(summary.total_delegated)));
+        output.extend_from_slice(&abi::encode_u256(U256::from(summary.total_rewards)));
+        output.extend_from_slice(&abi::encode_u256(U256::from(summary.validators.len())));
+
+        // Offset to validators array (3 * 32 + offset)
+        output.extend_from_slice(&abi::encode_u256(U256::from(128))); // offset to validators
+        output.extend_from_slice(&abi::encode_u256(U256::from(128 + 32 + summary.validators.len() * 32))); // offset to amounts
+
+        // Validators array
+        output.extend_from_slice(&abi::encode_u256(U256::from(summary.validators.len())));
+        for validator in &summary.validators {
+            let mut padded = [0u8; 32];
+            padded[12..32].copy_from_slice(validator.as_slice());
+            output.extend_from_slice(&padded);
+        }
+
+        // Amounts array
+        output.extend_from_slice(&abi::encode_u256(U256::from(summary.amounts.len())));
+        for amount in &summary.amounts {
+            output.extend_from_slice(&abi::encode_u256(U256::from(*amount)));
+        }
+
+        Ok(PrecompileOutput::new(Bytes::from(output), GAS_GET_ALL_DELEGATIONS))
+    }
+
+    /// Auto-rebalance stake when validators become inactive
+    ///
+    /// Moves stake from inactive/jailed validators to active ones from the provided list
+    fn auto_rebalance<DB: Database>(
+        caller: Address,
+        data: &[u8],
+        block_number: u64,
+        db: &mut StateAdapter<DB>,
+    ) -> Result<PrecompileOutput, PrecompileError>
+    where
+        DB::Error: std::fmt::Debug,
+    {
+        info!(caller = %caller, "Auto-rebalancing stake");
+
+        let target_validators = Self::decode_address_array(data)?;
+
+        if target_validators.is_empty() {
+            return Err(PrecompileError::InvalidInput("no target validators provided".into()));
+        }
+
+        let mut state = Self::load_state(db)?;
+        let mut logs = Vec::new();
+
+        // Get caller's delegations
+        let delegations = match state.delegations.get_mut(&caller) {
+            Some(d) => d,
+            None => return Err(PrecompileError::NoUnbonding), // No delegations to rebalance
+        };
+
+        // Find inactive validators and collect their stake
+        let mut stake_to_redistribute: u128 = 0;
+        let mut validators_to_remove = Vec::new();
+
+        for (validator, record) in delegations.iter() {
+            if let Some(val) = state.validators.get(validator) {
+                if !val.active || val.jailed {
+                    stake_to_redistribute += record.amount;
+                    validators_to_remove.push(*validator);
+                }
+            }
+        }
+
+        if stake_to_redistribute == 0 {
+            return Err(PrecompileError::InvalidInput("no inactive validators to rebalance from".into()));
+        }
+
+        // Filter target validators to only active ones
+        let active_targets: Vec<Address> = target_validators
+            .into_iter()
+            .filter(|v| {
+                state.validators.get(v).map(|val| val.active && !val.jailed).unwrap_or(false)
+            })
+            .collect();
+
+        if active_targets.is_empty() {
+            return Err(PrecompileError::InvalidInput("no active target validators".into()));
+        }
+
+        // Remove stake from inactive validators
+        for validator in &validators_to_remove {
+            if let Some(record) = delegations.remove(validator) {
+                if let Some(val) = state.validators.get_mut(validator) {
+                    val.total_stake = val.total_stake.saturating_sub(record.amount);
+                }
+                logs.push(Self::create_undelegated_event(caller, *validator, record.amount, block_number));
+            }
+        }
+
+        // Distribute to active validators evenly
+        let per_validator = stake_to_redistribute / active_targets.len() as u128;
+        let remainder = stake_to_redistribute % active_targets.len() as u128;
+
+        for (i, validator) in active_targets.iter().enumerate() {
+            let amount = if i == 0 { per_validator + remainder } else { per_validator };
+
+            if let Some(val) = state.validators.get_mut(validator) {
+                val.total_stake += amount;
+            }
+
+            let delegation = delegations.entry(*validator).or_insert(DelegationRecord {
+                amount: 0,
+                pending_rewards: 0,
+                last_reward_height: block_number,
+            });
+            delegation.amount += amount;
+
+            logs.push(Self::create_delegated_event(caller, *validator, amount));
+        }
+
+        Self::save_state(db, &state)?;
+
+        debug!(
+            caller = %caller,
+            redistributed = stake_to_redistribute,
+            from_validators = validators_to_remove.len(),
+            to_validators = active_targets.len(),
+            "Auto-rebalance complete"
+        );
+
+        let mut output = PrecompileOutput::new(
+            Bytes::copy_from_slice(&abi::encode_u256(U256::from(stake_to_redistribute))),
+            GAS_AUTO_REBALANCE,
+        );
+        for log in logs {
+            output.add_log(log);
+        }
+        Ok(output)
+    }
+
+    /// Internal batch delegate helper
+    fn batch_delegate_internal<DB: Database>(
+        caller: Address,
+        validators: &[Address],
+        amounts: &[u128],
+        block_number: u64,
+        db: &mut StateAdapter<DB>,
+    ) -> Result<PrecompileOutput, PrecompileError>
+    where
+        DB::Error: std::fmt::Debug,
+    {
+        let mut state = Self::load_state(db)?;
+        let mut logs = Vec::new();
+        let mut total_amount: u128 = 0;
+
+        for (validator, amount) in validators.iter().zip(amounts.iter()) {
+            let val = state
+                .validators
+                .get_mut(validator)
+                .ok_or(PrecompileError::ValidatorNotFound(*validator))?;
+
+            if !val.active || val.jailed {
+                return Err(PrecompileError::ValidatorInactive(*validator));
+            }
+
+            val.total_stake += *amount;
+
+            let delegations = state.delegations.entry(caller).or_default();
+            let delegation = delegations.entry(*validator).or_insert(DelegationRecord {
+                amount: 0,
+                pending_rewards: 0,
+                last_reward_height: block_number,
+            });
+            delegation.amount += *amount;
+            total_amount += *amount;
+
+            logs.push(Self::create_delegated_event(caller, *validator, *amount));
+        }
+
+        state.total_stake += total_amount;
+        Self::save_state(db, &state)?;
+
+        let gas_used = GAS_BATCH_DELEGATE_BASE +
+            (validators.len() as u64 * GAS_BATCH_DELEGATE_PER_VALIDATOR);
+
+        let mut output = PrecompileOutput::new(
+            Bytes::copy_from_slice(&abi::encode_u256(U256::from(total_amount))),
+            gas_used,
+        );
+        for log in logs {
+            output.add_log(log);
+        }
+        Ok(output)
+    }
+
+    /// Decode batch delegate parameters (validators[], amounts[])
+    fn decode_batch_delegate_params(data: &[u8]) -> Result<(Vec<Address>, Vec<u128>), PrecompileError> {
+        // Simplified ABI decoding for two dynamic arrays
+        if data.len() < 128 {
+            return Err(PrecompileError::InvalidInput("insufficient data for batch params".into()));
+        }
+
+        let validators_offset = abi::decode_u256(data, 0)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid validators offset".into()))?
+            .as_limbs()[0] as usize;
+        let amounts_offset = abi::decode_u256(data, 32)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid amounts offset".into()))?
+            .as_limbs()[0] as usize;
+
+        let validators = Self::decode_address_array_at(data, validators_offset)?;
+        let amounts = Self::decode_u128_array_at(data, amounts_offset)?;
+
+        Ok((validators, amounts))
+    }
+
+    /// Decode address array from data
+    fn decode_address_array(data: &[u8]) -> Result<Vec<Address>, PrecompileError> {
+        if data.len() < 32 {
+            return Err(PrecompileError::InvalidInput("insufficient data for array".into()));
+        }
+
+        let offset = abi::decode_u256(data, 0)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid array offset".into()))?
+            .as_limbs()[0] as usize;
+        Self::decode_address_array_at(data, offset)
+    }
+
+    /// Decode address array at specific offset
+    fn decode_address_array_at(data: &[u8], offset: usize) -> Result<Vec<Address>, PrecompileError> {
+        if offset + 32 > data.len() {
+            return Err(PrecompileError::InvalidInput("array offset out of bounds".into()));
+        }
+
+        let length = abi::decode_u256(data, offset)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid array length".into()))?
+            .as_limbs()[0] as usize;
+        let mut addresses = Vec::with_capacity(length);
+
+        for i in 0..length {
+            let addr_offset = offset + 32 + i * 32;
+            if addr_offset + 32 > data.len() {
+                return Err(PrecompileError::InvalidInput("array element out of bounds".into()));
+            }
+            if let Some(addr) = abi::decode_address(data, addr_offset) {
+                addresses.push(addr);
+            } else {
+                return Err(PrecompileError::InvalidInput("invalid address in array".into()));
+            }
+        }
+
+        Ok(addresses)
+    }
+
+    /// Decode u128 array at specific offset
+    fn decode_u128_array_at(data: &[u8], offset: usize) -> Result<Vec<u128>, PrecompileError> {
+        if offset + 32 > data.len() {
+            return Err(PrecompileError::InvalidInput("array offset out of bounds".into()));
+        }
+
+        let length = abi::decode_u256(data, offset)
+            .ok_or_else(|| PrecompileError::InvalidInput("invalid array length".into()))?
+            .as_limbs()[0] as usize;
+        let mut values = Vec::with_capacity(length);
+
+        for i in 0..length {
+            let val_offset = offset + 32 + i * 32;
+            if val_offset + 32 > data.len() {
+                return Err(PrecompileError::InvalidInput("array element out of bounds".into()));
+            }
+            let val = abi::decode_u256(data, val_offset)
+                .ok_or_else(|| PrecompileError::InvalidInput("invalid value in array".into()))?;
+            // Convert U256 to u128 (take lower 128 bits)
+            let lower = val.as_limbs()[0] as u128 | ((val.as_limbs()[1] as u128) << 64);
+            values.push(lower);
+        }
+
+        Ok(values)
     }
 
     // State management helpers

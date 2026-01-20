@@ -83,6 +83,10 @@ pub enum PrecompileError {
     #[error("validator is not active")]
     ValidatorNotActive,
 
+    /// Validator inactive (not active or jailed) - includes address for multi-delegation
+    #[error("validator is inactive: {0}")]
+    ValidatorInactive(Address),
+
     /// Validator is jailed
     #[error("validator is jailed until block {0}")]
     ValidatorJailed(u64),
@@ -213,6 +217,11 @@ impl PrecompileOutput {
             gas_used,
             logs,
         }
+    }
+
+    /// Add a log to the output
+    pub fn add_log(&mut self, log: revm::primitives::Log) {
+        self.logs.push(log);
     }
 }
 
@@ -461,6 +470,16 @@ pub mod staking_selectors {
     pub const GET_VALIDATOR: [u8; 4] = [0x1f, 0xa5, 0xc4, 0x80];
     /// getStake(address) view - Get stake info
     pub const GET_STAKE: [u8; 4] = [0x2e, 0xb4, 0xd3, 0x91];
+
+    // Multi-validator delegation selectors
+    /// batchDelegate(address[],uint256[]) - Delegate to multiple validators
+    pub const BATCH_DELEGATE: [u8; 4] = [0xba, 0x7c, 0xde, 0x12];
+    /// splitDelegate(address[]) - Split stake evenly among validators
+    pub const SPLIT_DELEGATE: [u8; 4] = [0x5d, 0x3f, 0xa1, 0xb9];
+    /// getAllDelegations(address) view - Get all delegations for an address
+    pub const GET_ALL_DELEGATIONS: [u8; 4] = [0x6e, 0x4f, 0xb2, 0xca];
+    /// autoRebalance(address[]) - Rebalance stake when validators become inactive
+    pub const AUTO_REBALANCE: [u8; 4] = [0x7f, 0x5a, 0xc3, 0xdb];
 }
 
 /// Function selectors for slashing precompile
