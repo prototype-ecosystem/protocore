@@ -439,7 +439,11 @@ impl Block {
 
         stream.begin_list(self.transactions.len());
         for tx in &self.transactions {
-            stream.append_raw(&tx.rlp_encode(), 1);
+            // EIP-2718 typed transactions must be encoded as RLP strings
+            // The tx.rlp_encode() returns [type_byte][rlp_payload]
+            // We wrap this as an RLP string to preserve the type byte
+            let tx_bytes = tx.rlp_encode();
+            stream.append(&tx_bytes);
         }
 
         stream.out().to_vec()
@@ -460,8 +464,10 @@ impl Block {
 
         let mut transactions = Vec::with_capacity(tx_count);
         for i in 0..tx_count {
-            let tx_data = tx_rlp.at(i).map_err(Error::RlpDecode)?.as_raw();
-            let tx = SignedTransaction::rlp_decode(tx_data)?;
+            // EIP-2718 typed transactions are stored as RLP strings
+            // Extract the byte array and decode the typed transaction
+            let tx_data: Vec<u8> = tx_rlp.val_at(i).map_err(Error::RlpDecode)?;
+            let tx = SignedTransaction::rlp_decode(&tx_data)?;
             transactions.push(tx);
         }
 

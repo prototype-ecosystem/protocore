@@ -170,3 +170,113 @@ fn test_transactions_root() {
     let block = Block::empty(BlockHeader::default());
     assert_eq!(block.compute_transactions_root(), H256::NIL);
 }
+
+#[test]
+fn test_block_rlp_roundtrip_with_transactions() {
+    use protocore_types::transaction::{SignedTransaction, Transaction, TxType, Signature};
+    use bytes::Bytes;
+
+    // Create a transaction
+    let tx = Transaction {
+        tx_type: TxType::DynamicFee,
+        chain_id: 1,
+        nonce: 0,
+        max_priority_fee_per_gas: 1_000_000_000,
+        max_fee_per_gas: 2_000_000_000,
+        gas_limit: 21000,
+        to: Some(Address::from_hex("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1").unwrap()),
+        value: 1_000_000_000_000_000_000, // 1 ETH
+        data: Bytes::new(),
+        access_list: vec![],
+    };
+
+    let signed_tx = SignedTransaction::new(
+        tx,
+        Signature {
+            v: 1,
+            r: H256::from([1u8; 32]),
+            s: H256::from([2u8; 32]),
+        },
+    ).expect("Failed to create signed tx");
+
+    // Create block with transaction
+    let header = BlockHeader::new(
+        1,
+        100,
+        1234567890,
+        H256::keccak256(b"parent"),
+        Address::from_hex("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1").unwrap(),
+    );
+
+    let block = Block::new(header.clone(), vec![signed_tx]);
+    assert_eq!(block.transaction_count(), 1);
+
+    // Encode and decode
+    let encoded = block.rlp_encode();
+    let decoded = Block::rlp_decode(&encoded).expect("Failed to decode block with transaction");
+
+    // Verify
+    assert_eq!(decoded.header, header);
+    assert_eq!(decoded.transaction_count(), 1);
+    assert_eq!(decoded.transactions[0].transaction.nonce, 0);
+    assert_eq!(decoded.transactions[0].transaction.value, 1_000_000_000_000_000_000);
+}
+
+#[test]
+fn test_block_rlp_roundtrip_multiple_transactions() {
+    use protocore_types::transaction::{SignedTransaction, Transaction, TxType, Signature};
+    use bytes::Bytes;
+
+    // Create 5 transactions using the same valid signature pattern as the single-tx test
+    let mut transactions = Vec::new();
+
+    for i in 0u64..5 {
+        let tx = Transaction {
+            tx_type: TxType::DynamicFee,
+            chain_id: 1,
+            nonce: i,
+            max_priority_fee_per_gas: 1_000_000_000,
+            max_fee_per_gas: 2_000_000_000,
+            gas_limit: 21000,
+            to: Some(Address::from_hex("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1").unwrap()),
+            value: (i as u128 + 1) * 1_000_000_000_000_000_000,
+            data: Bytes::new(),
+            access_list: vec![],
+        };
+
+        // Use the same valid signature pattern that works in single-tx test
+        let signed_tx = SignedTransaction::new(
+            tx,
+            Signature {
+                v: 1,
+                r: H256::from([1u8; 32]),
+                s: H256::from([2u8; 32]),
+            },
+        ).expect("Failed to create signed tx");
+        transactions.push(signed_tx);
+    }
+
+    let header = BlockHeader::new(
+        1,
+        100,
+        1234567890,
+        H256::keccak256(b"parent"),
+        Address::from_hex("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1").unwrap(),
+    );
+
+    let block = Block::new(header.clone(), transactions);
+    assert_eq!(block.transaction_count(), 5);
+
+    // Encode and decode
+    let encoded = block.rlp_encode();
+    let decoded = Block::rlp_decode(&encoded).expect("Failed to decode block with multiple transactions");
+
+    // Verify
+    assert_eq!(decoded.header, header);
+    assert_eq!(decoded.transaction_count(), 5);
+
+    for i in 0u64..5 {
+        assert_eq!(decoded.transactions[i as usize].transaction.nonce, i);
+        assert_eq!(decoded.transactions[i as usize].transaction.value, (i as u128 + 1) * 1_000_000_000_000_000_000);
+    }
+}
