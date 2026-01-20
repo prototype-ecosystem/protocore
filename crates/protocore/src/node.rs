@@ -1524,9 +1524,9 @@ impl Node {
         // Commit any pending state changes
         state_db.commit()?;
 
-        // Store block in database
+        // Store block in database (RLP encoded, consistent with genesis block storage)
         let block_hash = block.hash();
-        let block_data = serde_json::to_vec(block)?;
+        let block_data = block.rlp_encode();
         database.put_block(block_hash.as_bytes(), &block_data)?;
 
         // Update latest height in metadata
