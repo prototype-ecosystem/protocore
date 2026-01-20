@@ -103,6 +103,125 @@ impl RpcStateAdapter {
             })
             .unwrap_or(0)
     }
+
+    /// Internal helper to get a block by height
+    fn get_block_by_height_internal(&self, height: u64) -> Option<Block> {
+        // Get block hash from height
+        let height_key = format!("block_hash_{}", height);
+        let hash_bytes = match self.database.get_metadata(height_key.as_bytes()) {
+            Ok(Some(bytes)) if bytes.len() >= 32 => bytes,
+            _ => return None,
+        };
+
+        // Get block data by hash
+        let block_bytes = match self.database.get_block(&hash_bytes[..32]) {
+            Ok(Some(bytes)) => bytes,
+            _ => return None,
+        };
+
+        // Decode block
+        Block::rlp_decode(&block_bytes).ok()
+    }
+
+    /// Internal helper to get a block by hash
+    fn get_block_by_hash_internal(&self, hash: &[u8; 32]) -> Option<Block> {
+        // Get block data by hash
+        let block_bytes = match self.database.get_block(hash) {
+            Ok(Some(bytes)) => bytes,
+            _ => return None,
+        };
+
+        // Decode block
+        Block::rlp_decode(&block_bytes).ok()
+    }
+
+    /// Convert a Block to RpcBlock format
+    fn block_to_rpc(&self, block: &Block, full: bool) -> RpcBlock {
+        use protocore_rpc::{HexBytes, Transactions};
+
+        let block_hash = block.hash();
+        let header = &block.header;
+
+        // Convert transactions to hashes or full objects
+        let transactions = if full {
+            Transactions::Full(
+                block.transactions.iter().enumerate().map(|(idx, tx)| {
+                    self.tx_to_rpc(tx, Some(&block_hash), Some(header.height), Some(idx as u64))
+                }).collect()
+            )
+        } else {
+            Transactions::Hashes(
+                block.transactions.iter().map(|tx| {
+                    protocore_rpc::H256(tx.hash().into())
+                }).collect()
+            )
+        };
+
+        // Calculate block size (RLP encoded length)
+        let size = block.rlp_encode().len() as u64;
+
+        RpcBlock {
+            number: HexU64(header.height),
+            hash: protocore_rpc::H256(*block_hash.as_fixed_bytes()),
+            parent_hash: protocore_rpc::H256(*header.parent_hash.as_fixed_bytes()),
+            nonce: HexU64(0), // PoS, no nonce
+            sha3_uncles: protocore_rpc::H256([0u8; 32]), // No uncles
+            logs_bloom: HexBytes(vec![0u8; 256]), // Empty bloom
+            transactions_root: protocore_rpc::H256(*header.transactions_root.as_fixed_bytes()),
+            state_root: protocore_rpc::H256(*header.state_root.as_fixed_bytes()),
+            receipts_root: protocore_rpc::H256(*header.receipts_root.as_fixed_bytes()),
+            miner: protocore_rpc::Address(header.proposer.into()),
+            difficulty: HexU64(0), // PoS
+            total_difficulty: HexU256::from_u128(0),
+            extra_data: HexBytes(vec![]),
+            size: HexU64(size),
+            gas_limit: HexU64(header.gas_limit),
+            gas_used: HexU64(header.gas_used),
+            timestamp: HexU64(header.timestamp / 1000), // Convert ms to seconds
+            transactions,
+            uncles: vec![],
+            base_fee_per_gas: Some(HexU64(header.base_fee as u64)),
+            mix_hash: Some(protocore_rpc::H256([0u8; 32])),
+            withdrawals_root: None,
+        }
+    }
+
+    /// Convert a SignedTransaction to RpcTransaction format
+    fn tx_to_rpc(&self, tx: &protocore_types::SignedTransaction, block_hash: Option<&protocore_types::H256>, block_number: Option<u64>, tx_index: Option<u64>) -> RpcTransaction {
+        use protocore_rpc::HexBytes;
+
+        let inner_tx = &tx.transaction;
+        let sig = &tx.signature;
+
+        // Get sender address, fallback to zero address on error
+        let from_addr = tx.sender().unwrap_or_default();
+
+        // Determine transaction type
+        let tx_type_byte = inner_tx.tx_type.as_byte();
+
+        RpcTransaction {
+            hash: protocore_rpc::H256(tx.hash().into()),
+            nonce: HexU64(inner_tx.nonce),
+            block_hash: block_hash.map(|h| protocore_rpc::H256(*h.as_fixed_bytes())),
+            block_number: block_number.map(HexU64),
+            transaction_index: tx_index.map(HexU64),
+            from: protocore_rpc::Address(from_addr.into()),
+            to: inner_tx.to.map(|addr| protocore_rpc::Address(addr.into())),
+            value: HexU256::from_u128(inner_tx.value),
+            // For EIP-1559, gas_price is typically max_fee_per_gas
+            gas_price: Some(HexU64(inner_tx.max_fee_per_gas as u64)),
+            gas: HexU64(inner_tx.gas_limit),
+            input: HexBytes(inner_tx.data.to_vec()),
+            v: HexU64(sig.v),
+            r: HexU256(*sig.r.as_fixed_bytes()),
+            s: HexU256(*sig.s.as_fixed_bytes()),
+            tx_type: Some(HexU64(tx_type_byte as u64)),
+            max_fee_per_gas: Some(HexU64(inner_tx.max_fee_per_gas as u64)),
+            max_priority_fee_per_gas: Some(HexU64(inner_tx.max_priority_fee_per_gas as u64)),
+            chain_id: Some(HexU64(inner_tx.chain_id)),
+            access_list: None,
+        }
+    }
 }
 
 #[async_trait]
@@ -123,17 +242,23 @@ impl StateProvider for RpcStateAdapter {
         Ok(self.state_db.get_nonce(&address.0))
     }
 
-    async fn get_block_by_number(&self, block: &BlockNumberOrTag, _full: bool) -> Result<Option<RpcBlock>, RpcError> {
-        let height = self.resolve_block_number(block)?;
-        // In production, would fetch block from database and convert to RpcBlock
-        // For now, return None to indicate block not found (pending implementation)
+    async fn get_block_by_number(&self, block_tag: &BlockNumberOrTag, full: bool) -> Result<Option<RpcBlock>, RpcError> {
+        let height = self.resolve_block_number(block_tag)?;
         debug!(height = height, "get_block_by_number called");
-        Ok(None)
+
+        match self.get_block_by_height_internal(height) {
+            Some(block) => Ok(Some(self.block_to_rpc(&block, full))),
+            None => Ok(None),
+        }
     }
 
-    async fn get_block_by_hash(&self, _hash: &protocore_rpc::H256, _full: bool) -> Result<Option<RpcBlock>, RpcError> {
-        // In production, would fetch block from database by hash
-        Ok(None)
+    async fn get_block_by_hash(&self, hash: &protocore_rpc::H256, full: bool) -> Result<Option<RpcBlock>, RpcError> {
+        debug!(hash = %hex::encode(&hash.0[..8]), "get_block_by_hash called");
+
+        match self.get_block_by_hash_internal(&hash.0) {
+            Some(block) => Ok(Some(self.block_to_rpc(&block, full))),
+            None => Ok(None),
+        }
     }
 
     async fn get_transaction(&self, _hash: &protocore_rpc::H256) -> Result<Option<RpcTransaction>, RpcError> {
@@ -203,24 +328,53 @@ impl StateProvider for RpcStateAdapter {
         Err(RpcError::Internal("Transaction submission not implemented".to_string()))
     }
 
-    async fn get_block_transaction_count(&self, _block: &BlockNumberOrTag) -> Result<Option<u64>, RpcError> {
-        // In production, would fetch block and return tx count
-        Ok(Some(0))
+    async fn get_block_transaction_count(&self, block: &BlockNumberOrTag) -> Result<Option<u64>, RpcError> {
+        let height = self.resolve_block_number(block)?;
+
+        match self.get_block_by_height_internal(height) {
+            Some(block) => Ok(Some(block.transactions.len() as u64)),
+            None => Ok(None),
+        }
     }
 
-    async fn get_block_transaction_count_by_hash(&self, _hash: &protocore_rpc::H256) -> Result<Option<u64>, RpcError> {
-        // In production, would fetch block by hash and return tx count
-        Ok(Some(0))
+    async fn get_block_transaction_count_by_hash(&self, hash: &protocore_rpc::H256) -> Result<Option<u64>, RpcError> {
+        match self.get_block_by_hash_internal(&hash.0) {
+            Some(block) => Ok(Some(block.transactions.len() as u64)),
+            None => Ok(None),
+        }
     }
 
-    async fn get_transaction_by_index(&self, _block: &BlockNumberOrTag, _index: u64) -> Result<Option<RpcTransaction>, RpcError> {
-        // In production, would fetch transaction from block
-        Ok(None)
+    async fn get_transaction_by_index(&self, block: &BlockNumberOrTag, index: u64) -> Result<Option<RpcTransaction>, RpcError> {
+        let height = self.resolve_block_number(block)?;
+
+        let block = match self.get_block_by_height_internal(height) {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+
+        let tx = match block.transactions.get(index as usize) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        let block_hash = block.hash();
+        Ok(Some(self.tx_to_rpc(tx, Some(&block_hash), Some(height), Some(index))))
     }
 
-    async fn get_transaction_by_hash_and_index(&self, _hash: &protocore_rpc::H256, _index: u64) -> Result<Option<RpcTransaction>, RpcError> {
-        // In production, would fetch transaction from block by hash
-        Ok(None)
+    async fn get_transaction_by_hash_and_index(&self, hash: &protocore_rpc::H256, index: u64) -> Result<Option<RpcTransaction>, RpcError> {
+        let block = match self.get_block_by_hash_internal(&hash.0) {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+
+        let tx = match block.transactions.get(index as usize) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        let block_number = block.header.height;
+        let block_hash = protocore_types::H256::from(hash.0);
+        Ok(Some(self.tx_to_rpc(tx, Some(&block_hash), Some(block_number), Some(index))))
     }
 }
 
