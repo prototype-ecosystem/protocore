@@ -118,6 +118,9 @@ impl Step {
                 | (Step::Precommit, Step::Propose)
                 // Can also timeout during Prevote to move to next round
                 | (Step::Prevote, Step::Propose)
+                // Round catch-up: can jump to higher round Propose while still in Propose
+                // (e.g., received proposal/votes for round N+1 while waiting in Propose of round N)
+                | (Step::Propose, Step::Propose)
         )
     }
 
@@ -126,7 +129,7 @@ impl Step {
     pub fn valid_transitions(&self) -> &'static [Step] {
         match self {
             Step::NewHeight => &[Step::Propose],
-            Step::Propose => &[Step::Prevote],
+            Step::Propose => &[Step::Prevote, Step::Propose], // Propose for round catch-up
             Step::Prevote => &[Step::Precommit, Step::Propose], // Propose for round timeout
             Step::Precommit => &[Step::Commit, Step::Propose],  // Propose for round timeout
             Step::Commit => &[Step::NewHeight],

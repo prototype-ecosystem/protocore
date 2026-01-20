@@ -501,8 +501,20 @@ impl ConsensusStateMachine {
             });
         }
 
-        // Valid transitions: NewHeight -> Propose, or Precommit/Prevote -> Propose (round change)
-        if !matches!(self.step, Step::NewHeight | Step::Precommit | Step::Prevote) {
+        // Valid transitions: NewHeight -> Propose, or Precommit/Prevote/Propose -> Propose (round change)
+        // Note: Propose -> Propose is valid when catching up to a higher round (e.g., received
+        // proposal/votes for round N+1 while still waiting in Propose step of round N)
+        if !matches!(self.step, Step::NewHeight | Step::Precommit | Step::Prevote | Step::Propose) {
+            return Err(StateMachineError::InvalidTransition {
+                from: self.step,
+                to: Step::Propose,
+                height,
+                round,
+            });
+        }
+
+        // Extra safety: Propose -> Propose only allowed when round is actually increasing
+        if self.step == Step::Propose && height == self.height && round <= self.round {
             return Err(StateMachineError::InvalidTransition {
                 from: self.step,
                 to: Step::Propose,
@@ -1046,9 +1058,45 @@ mod tests {
         assert!(Step::Precommit.can_transition_to(Step::Propose));
         assert!(Step::Prevote.can_transition_to(Step::Propose));
 
+        // Round catch-up (Propose -> Propose for higher round)
+        assert!(Step::Propose.can_transition_to(Step::Propose));
+
         // Invalid transitions
         assert!(!Step::NewHeight.can_transition_to(Step::Prevote));
         assert!(!Step::NewHeight.can_transition_to(Step::Commit));
         assert!(!Step::Propose.can_transition_to(Step::Commit));
+    }
+
+    #[test]
+    fn test_round_catchup_from_propose() {
+        let mut sm = ConsensusStateMachine::new();
+
+        sm.initialize(1);
+
+        // Start round 0
+        sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 0 })
+            .unwrap();
+        assert_eq!(sm.step(), Step::Propose);
+        assert_eq!(sm.round(), 0);
+
+        // Catch up to round 2 while still in Propose (received proposal/votes for higher round)
+        sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 2 })
+            .unwrap();
+        assert_eq!(sm.step(), Step::Propose);
+        assert_eq!(sm.round(), 2);
+
+        // Cannot go back to lower round from Propose
+        let result = sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 1 });
+        assert!(matches!(
+            result,
+            Err(StateMachineError::RoundDecreased { .. })
+        ));
+
+        // Cannot stay at same round from Propose
+        let result = sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 2 });
+        assert!(matches!(
+            result,
+            Err(StateMachineError::InvalidTransition { .. })
+        ));
     }
 }
