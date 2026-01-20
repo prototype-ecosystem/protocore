@@ -812,6 +812,14 @@ impl BlockBuilder for NodeBlockBuilder {
         // Get pending transactions from mempool
         let txs = self.mempool.get_pending_transactions(self.gas_limit);
 
+        // Debug log to trace transaction inclusion
+        info!(
+            height = height,
+            pending_txs = txs.len(),
+            gas_limit = self.gas_limit,
+            "Building block"
+        );
+
         // Get current timestamp
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
