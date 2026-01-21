@@ -86,6 +86,8 @@ pub struct PendingTransaction {
     pub sender: Address,
     /// Transaction size in bytes
     pub size: usize,
+    /// Sequence number for stable ordering (assigned when added to mempool)
+    pub sequence: u64,
 }
 
 impl PendingTransaction {
@@ -109,25 +111,24 @@ impl PendingTransaction {
 ///
 /// Transactions are sorted by:
 /// 1. Gas price (descending)
-/// 2. Received time (ascending - first come first served for same price)
+/// 2. Sequence number (ascending - first come first served for same price)
 /// 3. Hash (for deterministic ordering)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct PriceOrderKey {
     /// Negated gas price for descending order
     neg_gas_price: i128,
-    /// Received timestamp for FIFO within same price
-    received_at_nanos: u128,
+    /// Sequence number for FIFO ordering (stable, doesn't change over time)
+    sequence: u64,
     /// Transaction hash for deterministic ordering
     hash: H256,
 }
 
 impl PriceOrderKey {
-    fn new(gas_price: u128, received_at: Instant, hash: H256) -> Self {
+    fn new(gas_price: u128, sequence: u64, hash: H256) -> Self {
         // Use negative gas price so higher prices come first in BTreeSet
         Self {
             neg_gas_price: -(gas_price as i128),
-            // Use elapsed().as_nanos() as a proxy for ordering
-            received_at_nanos: received_at.elapsed().as_nanos(),
+            sequence,
             hash,
         }
     }
@@ -152,6 +153,9 @@ struct MempoolInner {
 
     /// Total number of transactions
     total_count: usize,
+
+    /// Monotonically increasing sequence counter for stable ordering
+    next_sequence: u64,
 }
 
 impl MempoolInner {
@@ -163,6 +167,7 @@ impl MempoolInner {
             pending_by_price: BTreeSet::new(),
             total_bytes: 0,
             total_count: 0,
+            next_sequence: 0,
         }
     }
 }
@@ -404,41 +409,30 @@ impl<S: AccountStateProvider> Mempool<S> {
         // Validate transaction
         let validation_result = self.validator.validate(&tx)?;
 
+        // Add to pool - acquire lock first to get sequence number
+        let mut inner = self.inner.write();
+
+        // Assign sequence number and create pending transaction
+        let sequence = inner.next_sequence;
+        inner.next_sequence += 1;
+
         let pending_tx = PendingTransaction {
             tx,
             received_at: Instant::now(),
             gas_price: validation_result.effective_gas_price,
             sender: validation_result.sender,
             size: validation_result.tx_size,
+            sequence,
         };
-
-        // Add to pool
-        let mut inner = self.inner.write();
 
         // Check capacity
         self.ensure_capacity(&mut inner, pending_tx.size)?;
 
         // Determine if pending or queued based on nonce
         let account_nonce = self.state.get_nonce(&pending_tx.sender);
-        let tx_nonce = pending_tx.nonce();
-
-        // Log nonce info at INFO level to trace the pending/queued decision
-        info!(
-            sender = ?pending_tx.sender,
-            tx_nonce = tx_nonce,
-            account_nonce = account_nonce,
-            "Mempool nonce check"
-        );
-
         let is_pending = self.try_add_pending(&mut inner, &pending_tx, account_nonce)?;
 
         if !is_pending {
-            info!(
-                tx_hash = ?hash,
-                tx_nonce = tx_nonce,
-                account_nonce = account_nonce,
-                "Transaction queued (not pending) - nonce mismatch"
-            );
             self.add_queued(&mut inner, &pending_tx)?;
         }
 
@@ -447,13 +441,13 @@ impl<S: AccountStateProvider> Mempool<S> {
         inner.total_bytes += pending_tx.size;
         inner.total_count += 1;
 
-        info!(
+        debug!(
             tx_hash = ?hash,
             sender = ?pending_tx.sender,
             nonce = pending_tx.nonce(),
             gas_price = pending_tx.gas_price,
             is_pending = is_pending,
-            "Transaction added to mempool"
+            "transaction added to mempool"
         );
 
         Ok(hash)
@@ -569,7 +563,7 @@ impl<S: AccountStateProvider> Mempool<S> {
             .insert(pending_tx.nonce(), hash);
 
         // Add to price-sorted index
-        let price_key = PriceOrderKey::new(pending_tx.gas_price, pending_tx.received_at, hash);
+        let price_key = PriceOrderKey::new(pending_tx.gas_price, pending_tx.sequence, hash);
         inner.pending_by_price.insert(price_key);
     }
 
@@ -585,7 +579,7 @@ impl<S: AccountStateProvider> Mempool<S> {
             }
 
             // Remove from price-sorted index
-            let price_key = PriceOrderKey::new(pending_tx.gas_price, pending_tx.received_at, *hash);
+            let price_key = PriceOrderKey::new(pending_tx.gas_price, pending_tx.sequence, *hash);
             inner.pending_by_price.remove(&price_key);
         }
     }
@@ -829,35 +823,6 @@ impl<S: AccountStateProvider> Mempool<S> {
         let mut result = Vec::new();
         let mut gas_used = 0u64;
         let mut included_nonces: HashMap<Address, u64> = HashMap::new();
-
-        // Log pool state for debugging
-        let pending_price_count = inner.pending_by_price.len();
-        let pending_sender_count: usize = inner.pending_by_sender.values().map(|m| m.len()).sum();
-        let queued_count: usize = inner.queued_by_sender.values().map(|m| m.len()).sum();
-        let by_hash_count = inner.by_hash.len();
-        let total_count = inner.total_count;
-
-        if pending_price_count > 0 || queued_count > 0 || by_hash_count > 0 {
-            info!(
-                pending_price_count = pending_price_count,
-                pending_sender_count = pending_sender_count,
-                queued_count = queued_count,
-                by_hash_count = by_hash_count,
-                total_count = total_count,
-                gas_limit = gas_limit,
-                "get_pending_transactions called"
-            );
-
-            // Log individual entries for debugging
-            for price_key in inner.pending_by_price.iter().take(5) {
-                let in_by_hash = inner.by_hash.contains_key(&price_key.hash);
-                info!(
-                    hash = %price_key.hash,
-                    in_by_hash = in_by_hash,
-                    "pending_by_price entry"
-                );
-            }
-        }
 
         // Iterate by gas price (highest first)
         for price_key in &inner.pending_by_price {
@@ -1120,11 +1085,11 @@ mod tests {
     fn test_price_order_key_ordering() {
         let hash1 = H256::default();
         let hash2 = H256::default();
-        let now = Instant::now();
 
         // Higher gas price should come first (lower neg_gas_price)
-        let key1 = PriceOrderKey::new(100, now, hash1);
-        let key2 = PriceOrderKey::new(50, now, hash2);
+        // Using same sequence number to test price ordering
+        let key1 = PriceOrderKey::new(100, 0, hash1);
+        let key2 = PriceOrderKey::new(50, 0, hash2);
 
         assert!(key1 < key2); // key1 has higher price, so it should be "less" (come first)
     }
