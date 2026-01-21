@@ -420,9 +420,25 @@ impl<S: AccountStateProvider> Mempool<S> {
 
         // Determine if pending or queued based on nonce
         let account_nonce = self.state.get_nonce(&pending_tx.sender);
+        let tx_nonce = pending_tx.nonce();
+
+        // Log nonce info at INFO level to trace the pending/queued decision
+        info!(
+            sender = ?pending_tx.sender,
+            tx_nonce = tx_nonce,
+            account_nonce = account_nonce,
+            "Mempool nonce check"
+        );
+
         let is_pending = self.try_add_pending(&mut inner, &pending_tx, account_nonce)?;
 
         if !is_pending {
+            info!(
+                tx_hash = ?hash,
+                tx_nonce = tx_nonce,
+                account_nonce = account_nonce,
+                "Transaction queued (not pending) - nonce mismatch"
+            );
             self.add_queued(&mut inner, &pending_tx)?;
         }
 
@@ -431,13 +447,13 @@ impl<S: AccountStateProvider> Mempool<S> {
         inner.total_bytes += pending_tx.size;
         inner.total_count += 1;
 
-        debug!(
+        info!(
             tx_hash = ?hash,
             sender = ?pending_tx.sender,
             nonce = pending_tx.nonce(),
             gas_price = pending_tx.gas_price,
             is_pending = is_pending,
-            "transaction added to mempool"
+            "Transaction added to mempool"
         );
 
         Ok(hash)
@@ -813,6 +829,21 @@ impl<S: AccountStateProvider> Mempool<S> {
         let mut result = Vec::new();
         let mut gas_used = 0u64;
         let mut included_nonces: HashMap<Address, u64> = HashMap::new();
+
+        // Log pool state for debugging
+        let pending_count = inner.pending_by_price.len();
+        let queued_count: usize = inner.queued_by_sender.values().map(|m| m.len()).sum();
+        let total_count = inner.total_count;
+
+        if pending_count > 0 || queued_count > 0 {
+            info!(
+                pending_count = pending_count,
+                queued_count = queued_count,
+                total_count = total_count,
+                gas_limit = gas_limit,
+                "get_pending_transactions called"
+            );
+        }
 
         // Iterate by gas price (highest first)
         for price_key in &inner.pending_by_price {
