@@ -23,10 +23,140 @@ use protocore_consensus::{
     Validator as ConsensusValidator, ValidatorSet as ConsensusValidatorSet, Vote, VoteType,
 };
 use protocore_crypto::{BlsPrivateKey, BlsPublicKey, BlsSignature};
-use protocore_evm::{BlockContext, EvmConfig, EvmExecutor, MemoryDb, TransactionData};
+use protocore_evm::{BlockContext, EvmConfig, EvmExecutor, MemoryDb, StateRootProvider, TransactionData};
 use protocore_p2p::GossipMessage;
+use protocore_storage::StateDB;
 use protocore_types::{Address, Block};
-use revm::primitives::AccountInfo;
+use revm::primitives::{AccountInfo, HashMap as RevmHashMap};
+use std::collections::HashMap;
+
+/// Database wrapper for EVM execution that reads from StateDB and tracks writes
+struct ExecutionDb {
+    state_db: Arc<StateDB>,
+    accounts: HashMap<AlloyAddress, AccountInfo>,
+    storage_writes: HashMap<AlloyAddress, HashMap<U256, U256>>,
+    code: HashMap<B256, revm::primitives::Bytecode>,
+}
+
+impl ExecutionDb {
+    fn new(state_db: Arc<StateDB>) -> Self {
+        Self {
+            state_db,
+            accounts: HashMap::new(),
+            storage_writes: HashMap::new(),
+            code: HashMap::new(),
+        }
+    }
+
+    fn insert_account(&mut self, address: AlloyAddress, account: AccountInfo) {
+        self.accounts.insert(address, account);
+    }
+
+    fn insert_code(&mut self, code: revm::primitives::Bytecode) -> B256 {
+        let hash = code.hash_slow();
+        self.code.insert(hash, code);
+        hash
+    }
+
+    /// Get storage writes after execution
+    fn storage_writes(&self) -> &HashMap<AlloyAddress, HashMap<U256, U256>> {
+        &self.storage_writes
+    }
+}
+
+#[derive(Debug)]
+struct ExecutionDbError;
+
+impl std::fmt::Display for ExecutionDbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ExecutionDb error")
+    }
+}
+
+impl std::error::Error for ExecutionDbError {}
+
+impl revm::Database for ExecutionDb {
+    type Error = ExecutionDbError;
+
+    fn basic(&mut self, address: AlloyAddress) -> Result<Option<AccountInfo>, Self::Error> {
+        // Check cached accounts first
+        if let Some(account) = self.accounts.get(&address) {
+            return Ok(Some(account.clone()));
+        }
+
+        // Fall back to state_db
+        let addr_bytes: [u8; 20] = address.0.into();
+        if let Some(account) = self.state_db.get_account(&addr_bytes) {
+            let code_hash = if account.code_hash == [0u8; 32] {
+                B256::ZERO
+            } else {
+                B256::from_slice(&account.code_hash)
+            };
+            Ok(Some(AccountInfo {
+                balance: U256::from(account.balance),
+                nonce: account.nonce,
+                code_hash,
+                code: None,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<revm::primitives::Bytecode, Self::Error> {
+        // Check local cache first
+        if let Some(code) = self.code.get(&code_hash) {
+            return Ok(code.clone());
+        }
+
+        // Fall back to state_db
+        if let Some(code) = self.state_db.get_code(&code_hash.0) {
+            Ok(revm::primitives::Bytecode::new_raw(Bytes::from(code)))
+        } else {
+            Ok(revm::primitives::Bytecode::new())
+        }
+    }
+
+    fn storage(&mut self, address: AlloyAddress, index: U256) -> Result<U256, Self::Error> {
+        // Check writes cache first
+        if let Some(account_storage) = self.storage_writes.get(&address) {
+            if let Some(value) = account_storage.get(&index) {
+                return Ok(*value);
+            }
+        }
+
+        // Fall back to state_db
+        let addr_bytes: [u8; 20] = address.0.into();
+        let slot_bytes: [u8; 32] = index.to_be_bytes();
+        let value = self.state_db.get_storage(&addr_bytes, &slot_bytes);
+        Ok(U256::from_be_bytes(value))
+    }
+
+    fn block_hash(&mut self, _number: u64) -> Result<B256, Self::Error> {
+        Ok(B256::ZERO)
+    }
+}
+
+impl revm::DatabaseCommit for ExecutionDb {
+    fn commit(&mut self, changes: RevmHashMap<AlloyAddress, revm::primitives::Account>) {
+        for (address, account) in changes {
+            // Update account info
+            self.accounts.insert(address, account.info);
+
+            // Track storage writes
+            let storage = self.storage_writes.entry(address).or_default();
+            for (slot, value) in account.storage {
+                storage.insert(slot, value.present_value);
+            }
+        }
+    }
+}
+
+impl StateRootProvider for ExecutionDb {
+    fn state_root(&self) -> B256 {
+        B256::ZERO // Not needed for transaction execution
+    }
+}
 
 use crate::node::{Node, NodeBlockBuilder, NodeBlockValidator};
 
@@ -487,14 +617,14 @@ impl ValidatorNode {
 
                         if has_data || is_contract_creation {
                             // Execute via EVM for contract interactions
-                            // Create a MemoryDb populated with relevant accounts
-                            let mut memory_db = MemoryDb::new();
+                            // Create ExecutionDb that reads from StateDB and tracks writes
+                            let mut exec_db = ExecutionDb::new(Arc::clone(&state_db));
 
                             let from_alloy = AlloyAddress::from_slice(sender.as_fixed_bytes());
                             let sender_balance = state_db.get_balance(sender.as_fixed_bytes());
                             let sender_nonce = state_db.get_nonce(sender.as_fixed_bytes());
 
-                            memory_db.insert_account(
+                            exec_db.insert_account(
                                 from_alloy,
                                 AccountInfo {
                                     balance: U256::from(sender_balance),
@@ -514,8 +644,8 @@ impl ValidatorNode {
                                     if let Some(code) = state_db.get_code(&account.code_hash) {
                                         if !code.is_empty() {
                                             let bytecode = revm::primitives::Bytecode::new_raw(Bytes::from(code));
-                                            let code_hash = memory_db.insert_code(bytecode);
-                                            memory_db.insert_account(
+                                            let code_hash = exec_db.insert_code(bytecode);
+                                            exec_db.insert_account(
                                                 to_alloy,
                                                 AccountInfo {
                                                     balance: U256::from(to_balance),
@@ -533,12 +663,12 @@ impl ValidatorNode {
                                 }
                             }
 
-                            // Create EVM executor
+                            // Create EVM executor with ExecutionDb
                             let evm_config = EvmConfig {
                                 chain_id,
                                 ..EvmConfig::default()
                             };
-                            let mut executor = EvmExecutor::new(memory_db, evm_config);
+                            let mut executor = EvmExecutor::new(exec_db, evm_config);
 
                             // Build transaction data
                             let tx_data = TransactionData {
