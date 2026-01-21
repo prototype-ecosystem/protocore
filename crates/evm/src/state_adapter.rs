@@ -66,6 +66,36 @@ impl<DB: Database> StateAdapter<DB> {
         self.pending_storage.clear();
         self.pending_code.clear();
     }
+
+    /// Get pending storage changes for iterating
+    /// Returns an iterator over (address, storage_map) pairs
+    pub fn pending_changes(&self) -> Vec<(Address, PendingAccountChanges)> {
+        let mut changes = Vec::new();
+
+        // Get all addresses with pending changes
+        let mut addresses: std::collections::HashSet<Address> = self.pending_accounts.keys().cloned().collect();
+        for addr in self.pending_storage.keys() {
+            addresses.insert(*addr);
+        }
+
+        for address in addresses {
+            let account = self.pending_accounts.get(&address).cloned();
+            let storage = self.pending_storage.get(&address).cloned().unwrap_or_default();
+
+            changes.push((address, PendingAccountChanges { account, storage }));
+        }
+
+        changes
+    }
+}
+
+/// Pending changes for a single account
+#[derive(Clone, Debug, Default)]
+pub struct PendingAccountChanges {
+    /// Account info changes (balance, nonce, code_hash)
+    pub account: Option<AccountInfo>,
+    /// Storage slot changes
+    pub storage: HashMap<U256, U256>,
 }
 
 /// Additional methods for StateAdapter when the underlying DB provides state root

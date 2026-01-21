@@ -52,7 +52,7 @@ pub use precompiles::{
     Precompile, PrecompileError, PrecompileOutput, PrecompileRegistry, GOVERNANCE_ADDRESS,
     SLASHING_ADDRESS, STAKING_ADDRESS,
 };
-pub use state_adapter::{MemoryDb, MemoryDbError, StateAdapter, StateRootProvider};
+pub use state_adapter::{MemoryDb, MemoryDbError, PendingAccountChanges, StateAdapter, StateRootProvider};
 
 // Account abstraction deferred to phase2/
 // pub use aa::{...};
