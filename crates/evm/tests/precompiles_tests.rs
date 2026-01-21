@@ -1,9 +1,7 @@
 //! Integration tests for precompiles module
 
 use alloy_primitives::{Address, U256};
-use protocore_evm::precompiles::{
-    abi, GOVERNANCE_ADDRESS, SLASHING_ADDRESS, STAKING_ADDRESS,
-};
+use protocore_evm::precompiles::{abi, GOVERNANCE_ADDRESS, SLASHING_ADDRESS, STAKING_ADDRESS};
 
 /// Helper function to create an address from a low u64 value
 fn address_from_low_u64(v: u64) -> Address {

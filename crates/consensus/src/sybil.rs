@@ -37,9 +37,12 @@ use std::collections::{HashMap, HashSet};
 ///
 /// Higher confidence means stronger evidence of Sybil behavior.
 /// Penalties only apply at Medium or above, and only after the appeal window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ConfidenceLevel {
     /// Score < 1.0 - No Sybil signals detected
+    #[default]
     None,
     /// Score >= 1.0 AND < 2.0 - Weak signals, notification only
     Low,
@@ -73,12 +76,6 @@ impl ConfidenceLevel {
             self,
             ConfidenceLevel::Medium | ConfidenceLevel::High | ConfidenceLevel::Confirmed
         )
-    }
-}
-
-impl Default for ConfidenceLevel {
-    fn default() -> Self {
-        ConfidenceLevel::None
     }
 }
 
@@ -331,10 +328,8 @@ impl VoteCorrelationTracker {
 
         // Record the vote
         let block_votes = self.votes.entry(block_hash).or_default();
-        if !block_votes.contains_key(&validator) {
-            if !self.block_order.contains(&block_hash) {
-                self.block_order.push(block_hash);
-            }
+        if !block_votes.contains_key(&validator) && !self.block_order.contains(&block_hash) {
+            self.block_order.push(block_hash);
         }
         block_votes.insert(validator, (vote, timestamp_ms));
     }
@@ -345,10 +340,12 @@ impl VoteCorrelationTracker {
     }
 
     /// Get all controversial blocks with their votes.
-    pub fn controversial_blocks(&self) -> impl Iterator<Item = (&[u8; 32], &HashMap<Address, (bool, u64)>)> {
-        self.controversial.iter().filter_map(move |hash| {
-            self.votes.get(hash).map(|votes| (hash, votes))
-        })
+    pub fn controversial_blocks(
+        &self,
+    ) -> impl Iterator<Item = (&[u8; 32], &HashMap<Address, (bool, u64)>)> {
+        self.controversial
+            .iter()
+            .filter_map(move |hash| self.votes.get(hash).map(|votes| (hash, votes)))
     }
 
     /// Calculate vote correlation between two validators on controversial blocks.
@@ -382,10 +379,7 @@ impl VoteCorrelationTracker {
     /// Find validators with vote timing correlation on controversial blocks.
     ///
     /// Returns pairs of validators whose votes were submitted within threshold_ms of each other.
-    pub fn find_timing_correlations(
-        &self,
-        threshold_ms: u64,
-    ) -> Vec<(Address, Address, usize)> {
+    pub fn find_timing_correlations(&self, threshold_ms: u64) -> Vec<(Address, Address, usize)> {
         let mut correlations: HashMap<(Address, Address), usize> = HashMap::new();
 
         for (hash, votes) in &self.votes {
@@ -453,8 +447,9 @@ impl SybilDetector {
     /// Add a signal for a validator.
     pub fn add_signal(&mut self, validator: Address, signal: SybilSignal) {
         // Track first signal time for grace period
-        if !self.first_signal_at.contains_key(&validator) {
-            self.first_signal_at.insert(validator, signal.detected_at);
+        if let std::collections::hash_map::Entry::Vacant(e) = self.first_signal_at.entry(validator)
+        {
+            e.insert(signal.detected_at);
         }
 
         self.signals.entry(validator).or_default().push(signal);
@@ -468,7 +463,8 @@ impl SybilDetector {
         vote: bool,
         timestamp_ms: u64,
     ) {
-        self.vote_history.record_vote(validator, block_hash, vote, timestamp_ms);
+        self.vote_history
+            .record_vote(validator, block_hash, vote, timestamp_ms);
     }
 
     /// Mark a block as controversial (>10% disagree).
@@ -571,13 +567,18 @@ impl SybilDetector {
     }
 
     /// Check if a validator already has a specific signal type with a related validator.
-    fn has_signal_type(&self, validator: &Address, signal_type: SignalType, related: &Address) -> bool {
+    fn has_signal_type(
+        &self,
+        validator: &Address,
+        signal_type: SignalType,
+        related: &Address,
+    ) -> bool {
         self.signals
             .get(validator)
             .map(|signals| {
-                signals.iter().any(|s| {
-                    s.signal_type == signal_type && s.related_validators.contains(related)
-                })
+                signals
+                    .iter()
+                    .any(|s| s.signal_type == signal_type && s.related_validators.contains(related))
             })
             .unwrap_or(false)
     }
@@ -585,11 +586,18 @@ impl SybilDetector {
     /// Check for validators sharing the same withdrawal address.
     ///
     /// Input: list of (validator_address, withdrawal_address) pairs.
-    pub fn check_withdrawal_addresses(&mut self, validators: &[(Address, Address)], current_timestamp: u64) {
+    pub fn check_withdrawal_addresses(
+        &mut self,
+        validators: &[(Address, Address)],
+        current_timestamp: u64,
+    ) {
         // Group validators by withdrawal address
         let mut by_withdrawal: HashMap<Address, Vec<Address>> = HashMap::new();
         for (validator, withdrawal) in validators {
-            by_withdrawal.entry(*withdrawal).or_default().push(*validator);
+            by_withdrawal
+                .entry(*withdrawal)
+                .or_default()
+                .push(*validator);
         }
 
         // Flag validators that share withdrawal addresses
@@ -609,7 +617,11 @@ impl SybilDetector {
                     );
 
                     // Check if we already have this signal
-                    if !self.has_signal_type(validator, SignalType::SameWithdrawalAddress, &related[0]) {
+                    if !self.has_signal_type(
+                        validator,
+                        SignalType::SameWithdrawalAddress,
+                        &related[0],
+                    ) {
                         let signal = SybilSignal::with_weight(
                             SignalType::SameWithdrawalAddress,
                             self.config.weight_same_withdrawal,
@@ -627,7 +639,11 @@ impl SybilDetector {
     /// Check for IP clustering (/24 subnet).
     ///
     /// Input: list of (validator_address, ip_address) pairs.
-    pub fn check_ip_clustering(&mut self, validators: &[(Address, [u8; 4])], current_timestamp: u64) {
+    pub fn check_ip_clustering(
+        &mut self,
+        validators: &[(Address, [u8; 4])],
+        current_timestamp: u64,
+    ) {
         // Group validators by /24 subnet (first 3 octets)
         let mut by_subnet: HashMap<[u8; 3], Vec<(Address, [u8; 4])>> = HashMap::new();
         for (validator, ip) in validators {
@@ -647,8 +663,13 @@ impl SybilDetector {
 
                     let evidence = format!(
                         "IP {}.{}.{}.{} in subnet {}.{}.{}.0/24 with {} other validator(s)",
-                        ip[0], ip[1], ip[2], ip[3],
-                        subnet[0], subnet[1], subnet[2],
+                        ip[0],
+                        ip[1],
+                        ip[2],
+                        ip[3],
+                        subnet[0],
+                        subnet[1],
+                        subnet[2],
                         related.len()
                     );
 
@@ -671,7 +692,11 @@ impl SybilDetector {
     /// Check for validators registered in the same epoch.
     ///
     /// Input: list of (validator_address, registration_epoch) pairs.
-    pub fn check_registration_epochs(&mut self, validators: &[(Address, u64)], current_timestamp: u64) {
+    pub fn check_registration_epochs(
+        &mut self,
+        validators: &[(Address, u64)],
+        current_timestamp: u64,
+    ) {
         // Group validators by registration epoch
         let mut by_epoch: HashMap<u64, Vec<Address>> = HashMap::new();
         for (validator, epoch) in validators {
@@ -695,7 +720,13 @@ impl SybilDetector {
                     );
 
                     // Check if we already have this signal
-                    if !related.is_empty() && !self.has_signal_type(validator, SignalType::SameRegistrationEpoch, &related[0]) {
+                    if !related.is_empty()
+                        && !self.has_signal_type(
+                            validator,
+                            SignalType::SameRegistrationEpoch,
+                            &related[0],
+                        )
+                    {
                         let signal = SybilSignal::with_weight(
                             SignalType::SameRegistrationEpoch,
                             self.config.weight_same_registration,
@@ -713,7 +744,11 @@ impl SybilDetector {
     /// Check for validators with identical stake amounts.
     ///
     /// Input: list of (validator_address, stake_amount) pairs.
-    pub fn check_identical_stakes(&mut self, validators: &[(Address, u128)], current_timestamp: u64) {
+    pub fn check_identical_stakes(
+        &mut self,
+        validators: &[(Address, u128)],
+        current_timestamp: u64,
+    ) {
         // Group validators by stake amount
         let mut by_stake: HashMap<u128, Vec<Address>> = HashMap::new();
         for (validator, stake) in validators {
@@ -737,7 +772,13 @@ impl SybilDetector {
                     );
 
                     // Check if we already have this signal
-                    if !related.is_empty() && !self.has_signal_type(validator, SignalType::IdenticalStakeAmount, &related[0]) {
+                    if !related.is_empty()
+                        && !self.has_signal_type(
+                            validator,
+                            SignalType::IdenticalStakeAmount,
+                            &related[0],
+                        )
+                    {
                         let signal = SybilSignal::with_weight(
                             SignalType::IdenticalStakeAmount,
                             self.config.weight_identical_stake,
@@ -827,20 +868,17 @@ impl SybilDetector {
             ConfidenceLevel::from_score(signal_score)
         };
 
-        let active_signals = self
-            .signals
-            .get(validator)
-            .cloned()
-            .unwrap_or_default();
+        let active_signals = self.signals.get(validator).cloned().unwrap_or_default();
 
         let appeal_status = self.appeals.get(validator).cloned();
 
         let penalty = self.calculate_penalty(validator, current_timestamp);
 
         // Calculate when penalty becomes effective
-        let penalty_effective_at = self.first_signal_at.get(validator).map(|first| {
-            first + self.config.appeal_grace_period_secs
-        });
+        let penalty_effective_at = self
+            .first_signal_at
+            .get(validator)
+            .map(|first| first + self.config.appeal_grace_period_secs);
 
         SybilStatus {
             confidence_level,
@@ -903,7 +941,10 @@ impl SybilDetector {
 
     /// Check if a validator has any active signals.
     pub fn has_signals(&self, validator: &Address) -> bool {
-        self.signals.get(validator).map(|s| !s.is_empty()).unwrap_or(false)
+        self.signals
+            .get(validator)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
     }
 
     /// Get the number of active signals for a validator.

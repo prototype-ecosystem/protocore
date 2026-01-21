@@ -1,9 +1,7 @@
 //! Tests for WebSocket subscriptions
 
+use protocore_rpc::types::{Address, AddressFilter, HexBytes, HexU64, RpcLog, TopicFilter, H256};
 use protocore_rpc::ws::{LogSubscriptionParams, SubscriptionKind, SubscriptionManager};
-use protocore_rpc::types::{
-    Address, AddressFilter, H256, HexBytes, HexU64, RpcLog, TopicFilter,
-};
 
 // Helper function for log filter matching (replicated from ws.rs for testing)
 fn matches_log_filter(log: &RpcLog, filter: &LogSubscriptionParams) -> bool {
@@ -61,7 +59,9 @@ fn test_subscription_kind_parse() {
         SubscriptionKind::Logs
     );
     assert_eq!(
-        "newPendingTransactions".parse::<SubscriptionKind>().unwrap(),
+        "newPendingTransactions"
+            .parse::<SubscriptionKind>()
+            .unwrap(),
         SubscriptionKind::NewPendingTransactions
     );
     assert_eq!(
@@ -90,10 +90,7 @@ fn test_subscription_manager() {
 fn test_log_filter_matching() {
     let log = RpcLog {
         address: Address([0x42; 20]),
-        topics: vec![
-            H256([0x01; 32]),
-            H256([0x02; 32]),
-        ],
+        topics: vec![H256([0x01; 32]), H256([0x02; 32])],
         data: HexBytes(vec![]),
         block_number: HexU64(100),
         transaction_hash: H256::ZERO,

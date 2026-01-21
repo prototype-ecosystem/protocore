@@ -29,8 +29,7 @@ fn test_generate_and_verify_block_randomness() {
     let block_randomness = beacon.generate_block_randomness(&vrf_key, 1, &parent_hash);
 
     // Verify and apply
-    let result =
-        beacon.verify_and_apply(1, &parent_hash, vrf_key.public_key(), &block_randomness);
+    let result = beacon.verify_and_apply(1, &parent_hash, vrf_key.public_key(), &block_randomness);
 
     assert!(result.is_ok());
     assert_eq!(beacon.epoch_contribution_count(), 1);
@@ -89,10 +88,14 @@ fn test_epoch_transition() {
     // Process blocks 1-5 (epoch 0)
     for height in 1..=blocks_per_epoch {
         let parent_hash = [height as u8; 32];
-        let block_randomness =
-            beacon.generate_block_randomness(&vrf_key, height, &parent_hash);
+        let block_randomness = beacon.generate_block_randomness(&vrf_key, height, &parent_hash);
         beacon
-            .verify_and_apply(height, &parent_hash, vrf_key.public_key(), &block_randomness)
+            .verify_and_apply(
+                height,
+                &parent_hash,
+                vrf_key.public_key(),
+                &block_randomness,
+            )
             .unwrap();
     }
 
@@ -118,14 +121,23 @@ fn test_deterministic_randomness() {
     // Process same blocks on both beacons
     for height in 1..=6 {
         let parent_hash = [height as u8; 32];
-        let block_randomness =
-            beacon1.generate_block_randomness(&vrf_key, height, &parent_hash);
+        let block_randomness = beacon1.generate_block_randomness(&vrf_key, height, &parent_hash);
 
         beacon1
-            .verify_and_apply(height, &parent_hash, vrf_key.public_key(), &block_randomness)
+            .verify_and_apply(
+                height,
+                &parent_hash,
+                vrf_key.public_key(),
+                &block_randomness,
+            )
             .unwrap();
         beacon2
-            .verify_and_apply(height, &parent_hash, vrf_key.public_key(), &block_randomness)
+            .verify_and_apply(
+                height,
+                &parent_hash,
+                vrf_key.public_key(),
+                &block_randomness,
+            )
             .unwrap();
     }
 
@@ -144,10 +156,14 @@ fn test_snapshot_and_restore() {
     // Add some contributions
     for height in 1..=10 {
         let parent_hash = [height as u8; 32];
-        let block_randomness =
-            beacon.generate_block_randomness(&vrf_key, height, &parent_hash);
+        let block_randomness = beacon.generate_block_randomness(&vrf_key, height, &parent_hash);
         beacon
-            .verify_and_apply(height, &parent_hash, vrf_key.public_key(), &block_randomness)
+            .verify_and_apply(
+                height,
+                &parent_hash,
+                vrf_key.public_key(),
+                &block_randomness,
+            )
             .unwrap();
     }
 
@@ -176,10 +192,14 @@ fn test_for_epoch_queries() {
     // Process blocks to transition epochs
     for height in 1..=4 {
         let parent_hash = [height as u8; 32];
-        let block_randomness =
-            beacon.generate_block_randomness(&vrf_key, height, &parent_hash);
+        let block_randomness = beacon.generate_block_randomness(&vrf_key, height, &parent_hash);
         beacon
-            .verify_and_apply(height, &parent_hash, vrf_key.public_key(), &block_randomness)
+            .verify_and_apply(
+                height,
+                &parent_hash,
+                vrf_key.public_key(),
+                &block_randomness,
+            )
             .unwrap();
     }
 
@@ -221,10 +241,14 @@ fn test_reset() {
     // Add some state
     for height in 1..=10 {
         let parent_hash = [height as u8; 32];
-        let block_randomness =
-            beacon.generate_block_randomness(&vrf_key, height, &parent_hash);
+        let block_randomness = beacon.generate_block_randomness(&vrf_key, height, &parent_hash);
         beacon
-            .verify_and_apply(height, &parent_hash, vrf_key.public_key(), &block_randomness)
+            .verify_and_apply(
+                height,
+                &parent_hash,
+                vrf_key.public_key(),
+                &block_randomness,
+            )
             .unwrap();
     }
 

@@ -13,7 +13,7 @@ use tracing::{debug, info};
 ///
 /// Loaded from a single `protocore.toml` file following Proto Core's
 /// single-config philosophy.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     /// Chain identity configuration
     pub chain: ChainConfig,
@@ -167,35 +167,13 @@ impl Config {
 
     /// Save configuration to a TOML file.
     pub fn save(&self, path: &Path) -> ConfigResult<()> {
-        let content =
-            toml::to_string_pretty(self).map_err(|e| ConfigError::GenesisBlockGeneration(e.to_string()))?;
+        let content = toml::to_string_pretty(self)
+            .map_err(|e| ConfigError::GenesisBlockGeneration(e.to_string()))?;
         std::fs::write(path, content).map_err(|e| ConfigError::FileRead {
             path: path.to_path_buf(),
             source: e,
         })?;
         Ok(())
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            chain: ChainConfig::default(),
-            consensus: ConsensusConfig::default(),
-            economics: EconomicsConfig::default(),
-            staking: StakingConfig::default(),
-            slashing: SlashingConfig::default(),
-            governance: GovernanceConfig::default(),
-            privacy: PrivacyConfig::default(),
-            network: NetworkConfig::default(),
-            rpc: RpcConfig::default(),
-            storage: StorageConfig::default(),
-            logging: LoggingConfig::default(),
-            metrics: MetricsConfig::default(),
-            genesis: GenesisConfig::default(),
-            inverse_rewards: None,
-            integrity: None,
-        }
     }
 }
 
@@ -493,7 +471,9 @@ impl StakingConfig {
 
         // Validate stake values are valid numbers
         if self.min_validator_stake.parse::<u128>().is_err() {
-            return Err(ConfigError::InvalidBalance(self.min_validator_stake.clone()));
+            return Err(ConfigError::InvalidBalance(
+                self.min_validator_stake.clone(),
+            ));
         }
 
         if self.min_delegation.parse::<u128>().is_err() {
@@ -1433,7 +1413,9 @@ impl UpgradeConfig {
         }
 
         if !(0.0..=1.0).contains(&self.approval_threshold) {
-            return Err(ConfigError::InvalidApprovalThreshold(self.approval_threshold));
+            return Err(ConfigError::InvalidApprovalThreshold(
+                self.approval_threshold,
+            ));
         }
 
         Ok(())
@@ -1478,4 +1460,3 @@ impl Default for MempoolConfig {
         }
     }
 }
-

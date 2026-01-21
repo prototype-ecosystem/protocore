@@ -35,7 +35,6 @@
 use crate::{keccak256, CryptoError, Result};
 use k256::{
     elliptic_curve::{
-        bigint::Encoding,
         group::GroupEncoding,
         ops::Reduce,
         sec1::{FromEncodedPoint, ToEncodedPoint},
@@ -228,7 +227,7 @@ impl SchnorrSecretKey {
     fn generate_nonce(&self, message: &[u8]) -> Scalar {
         let mut hasher = Keccak256::new();
         hasher.update(b"schnorr_nonce");
-        hasher.update(&self.scalar.to_bytes());
+        hasher.update(self.scalar.to_bytes());
         hasher.update(message);
         let hash: [u8; 32] = hasher.finalize().into();
         let nonce = <Scalar as Reduce<U256>>::reduce_bytes(&hash.into());
@@ -244,7 +243,7 @@ impl SchnorrSecretKey {
     fn generate_nonce_with_aux(&self, message: &[u8], aux: &[u8; 32]) -> Scalar {
         let mut hasher = Keccak256::new();
         hasher.update(b"schnorr_nonce_aux");
-        hasher.update(&self.scalar.to_bytes());
+        hasher.update(self.scalar.to_bytes());
         hasher.update(aux);
         hasher.update(message);
         let hash: [u8; 32] = hasher.finalize().into();
@@ -261,7 +260,7 @@ impl SchnorrSecretKey {
         let mut hasher = Keccak256::new();
         hasher.update(b"schnorr_challenge");
         hasher.update(r);
-        hasher.update(&self.public.bytes);
+        hasher.update(self.public.bytes);
         hasher.update(message);
         let hash: [u8; 32] = hasher.finalize().into();
         <Scalar as Reduce<U256>>::reduce_bytes(&hash.into())
@@ -276,7 +275,7 @@ impl SchnorrPublicKey {
         compressed[0] = 0x02; // Even y
         compressed[1..].copy_from_slice(bytes);
 
-        let encoded = k256::EncodedPoint::from_bytes(&compressed)
+        let encoded = k256::EncodedPoint::from_bytes(compressed)
             .map_err(|e| CryptoError::InvalidPublicKey(e.to_string()))?;
 
         let affine_opt = AffinePoint::from_encoded_point(&encoded);
@@ -285,7 +284,7 @@ impl SchnorrPublicKey {
         } else {
             // Try with odd y-coordinate
             compressed[0] = 0x03;
-            let encoded = k256::EncodedPoint::from_bytes(&compressed)
+            let encoded = k256::EncodedPoint::from_bytes(compressed)
                 .map_err(|e| CryptoError::InvalidPublicKey(e.to_string()))?;
 
             let affine_opt = AffinePoint::from_encoded_point(&encoded);
@@ -357,7 +356,7 @@ impl SchnorrPublicKey {
         let mut hasher = Keccak256::new();
         hasher.update(b"schnorr_challenge");
         hasher.update(r);
-        hasher.update(&self.bytes);
+        hasher.update(self.bytes);
         hasher.update(message);
         let hash: [u8; 32] = hasher.finalize().into();
         <Scalar as Reduce<U256>>::reduce_bytes(&hash.into())
@@ -369,7 +368,7 @@ impl SchnorrPublicKey {
         compressed[0] = 0x02;
         compressed[1..].copy_from_slice(r_bytes);
 
-        let encoded = k256::EncodedPoint::from_bytes(&compressed).ok()?;
+        let encoded = k256::EncodedPoint::from_bytes(compressed).ok()?;
         let affine_opt = AffinePoint::from_encoded_point(&encoded);
 
         if affine_opt.is_some().into() {
@@ -378,7 +377,7 @@ impl SchnorrPublicKey {
 
         // Try odd y
         compressed[0] = 0x03;
-        let encoded = k256::EncodedPoint::from_bytes(&compressed).ok()?;
+        let encoded = k256::EncodedPoint::from_bytes(compressed).ok()?;
         let affine_opt = AffinePoint::from_encoded_point(&encoded);
 
         if affine_opt.is_some().into() {
@@ -464,9 +463,9 @@ pub fn batch_verify(
         // e = H(R || P || m)
         let e = pk.compute_challenge(&sig.r, messages[i]);
 
-        sum_zs = sum_zs + z * s;
-        sum_zr = sum_zr + r_point * z;
-        sum_zep = sum_zep + pk.point * (z * e);
+        sum_zs += z * s;
+        sum_zr += r_point * z;
+        sum_zep += pk.point * (z * e);
     }
 
     // Check: sum(z_i * s_i) * G == sum(z_i * R_i) + sum(z_i * e_i * P_i)
@@ -484,7 +483,7 @@ pub mod multisig {
         for (i, pk) in pubkeys.iter().enumerate() {
             // Compute key coefficient: a_i = H(L || P_i)
             let coeff = compute_key_coeff(pubkeys, i);
-            agg_point = agg_point + pk.point * coeff;
+            agg_point += pk.point * coeff;
         }
 
         let affine = agg_point.to_affine();
@@ -503,9 +502,9 @@ pub mod multisig {
 
         // L = H(P_1 || P_2 || ... || P_n)
         for pk in pubkeys {
-            hasher.update(&pk.bytes);
+            hasher.update(pk.bytes);
         }
-        hasher.update(&pubkeys[index].bytes);
+        hasher.update(pubkeys[index].bytes);
 
         let hash: [u8; 32] = hasher.finalize().into();
         <Scalar as Reduce<U256>>::reduce_bytes(&hash.into())
@@ -576,7 +575,7 @@ pub mod multisig {
             let mut hasher = Keccak256::new();
             hasher.update(b"schnorr_challenge");
             hasher.update(combined_r);
-            hasher.update(&agg_pubkey.bytes);
+            hasher.update(agg_pubkey.bytes);
             hasher.update(message);
             let hash: [u8; 32] = hasher.finalize().into();
             let e = <Scalar as Reduce<U256>>::reduce_bytes(&hash.into());
@@ -611,7 +610,7 @@ pub mod multisig {
         for partial in partials {
             let s_opt = Scalar::from_repr(partial.s.into());
             if s_opt.is_some().into() {
-                sum_s = sum_s + s_opt.unwrap();
+                sum_s += s_opt.unwrap();
             }
         }
 
@@ -622,10 +621,7 @@ pub mod multisig {
     }
 
     /// Combine nonce commitments from all signers
-    pub fn combine_nonces(
-        commitments: &[[u8; 64]],
-        message: &[u8],
-    ) -> [u8; 32] {
+    pub fn combine_nonces(commitments: &[[u8; 64]], message: &[u8]) -> [u8; 32] {
         // Sum all R1 and R2 points
         let mut sum_r1 = ProjectivePoint::IDENTITY;
         let mut sum_r2 = ProjectivePoint::IDENTITY;
@@ -633,8 +629,8 @@ pub mod multisig {
         for commit in commitments {
             let r1 = parse_point_from_x(&commit[0..32]).unwrap_or(ProjectivePoint::IDENTITY);
             let r2 = parse_point_from_x(&commit[32..64]).unwrap_or(ProjectivePoint::IDENTITY);
-            sum_r1 = sum_r1 + r1;
-            sum_r2 = sum_r2 + r2;
+            sum_r1 += r1;
+            sum_r2 += r2;
         }
 
         // Compute b = H(sum_R1 || sum_R2 || m)
@@ -654,7 +650,12 @@ pub mod multisig {
         let combined_r_affine = combined_r.to_affine();
         let combined_r_encoded = combined_r_affine.to_encoded_point(true);
 
-        combined_r_encoded.x().unwrap().as_slice().try_into().unwrap()
+        combined_r_encoded
+            .x()
+            .unwrap()
+            .as_slice()
+            .try_into()
+            .unwrap()
     }
 
     fn parse_point_from_x(x_bytes: &[u8]) -> Option<ProjectivePoint> {
@@ -666,7 +667,7 @@ pub mod multisig {
         compressed[0] = 0x02;
         compressed[1..].copy_from_slice(x_bytes);
 
-        let encoded = k256::EncodedPoint::from_bytes(&compressed).ok()?;
+        let encoded = k256::EncodedPoint::from_bytes(compressed).ok()?;
         let affine_opt = AffinePoint::from_encoded_point(&encoded);
 
         if affine_opt.is_some().into() {
@@ -674,7 +675,7 @@ pub mod multisig {
         }
 
         compressed[0] = 0x03;
-        let encoded = k256::EncodedPoint::from_bytes(&compressed).ok()?;
+        let encoded = k256::EncodedPoint::from_bytes(compressed).ok()?;
         let affine_opt = AffinePoint::from_encoded_point(&encoded);
 
         if affine_opt.is_some().into() {
@@ -684,4 +685,3 @@ pub mod multisig {
         }
     }
 }
-

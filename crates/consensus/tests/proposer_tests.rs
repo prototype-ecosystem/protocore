@@ -1,9 +1,6 @@
 //! Integration tests for proposer selection module.
 
-use protocore_consensus::{
-    ProposerConfig, ProposerError, ProposerSelection, ProposerSelector, ProposerSnapshot,
-    ProposerStats,
-};
+use protocore_consensus::{ProposerConfig, ProposerError, ProposerSelection, ProposerSelector};
 use protocore_types::Address;
 use std::collections::HashMap;
 
@@ -250,6 +247,11 @@ fn test_fair_distribution() {
     }
 
     for v in &validators {
-        assert_eq!(counts.get(&v), Some(&1), "Validator {:?} should appear exactly once", v);
+        assert_eq!(
+            counts.get(&v),
+            Some(&1),
+            "Validator {:?} should appear exactly once",
+            v
+        );
     }
 }

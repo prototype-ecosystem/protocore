@@ -3,9 +3,9 @@
 use alloy_primitives::U256;
 use protocore_config::{
     AttestationConfig, BanType, ChainConfig, Config, ConfigError, ConsensusConfig, EconomicsConfig,
-    FailureAction, IntegrityConfig, IntegritySlashingConfig, InverseRewardsConfig,
-    RewardWeights, RpcConfig, StorageConfig, SybilPenalties, SybilResistanceConfig,
-    SybilSignalWeights, UpgradeConfig,
+    FailureAction, IntegrityConfig, IntegritySlashingConfig, InverseRewardsConfig, RewardWeights,
+    RpcConfig, StorageConfig, SybilPenalties, SybilResistanceConfig, SybilSignalWeights,
+    UpgradeConfig,
 };
 
 #[test]
@@ -28,7 +28,10 @@ fn test_consensus_timeouts() {
 fn test_invalid_chain_id() {
     let mut config = ChainConfig::default();
     config.chain_id = 0;
-    assert!(matches!(config.validate(), Err(ConfigError::InvalidChainId)));
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidChainId)
+    ));
 }
 
 #[test]
@@ -197,7 +200,10 @@ fn test_integrity_config_default() {
     assert!(config.attestation.enabled);
     assert_eq!(config.attestation.challenge_interval_secs, 300);
     assert_eq!(config.attestation.response_timeout_secs, 30);
-    assert_eq!(config.attestation.failure_action, FailureAction::ReduceScore);
+    assert_eq!(
+        config.attestation.failure_action,
+        FailureAction::ReduceScore
+    );
     assert_eq!(config.attestation.jail_threshold, 3);
     assert!(config.validate().is_ok());
 }
@@ -219,7 +225,10 @@ fn test_attestation_config_invalid_challenge_interval() {
     config.challenge_interval_secs = 0;
     assert!(matches!(
         config.validate(),
-        Err(ConfigError::InvalidTimeout { name: "challenge_interval_secs", value: 0 })
+        Err(ConfigError::InvalidTimeout {
+            name: "challenge_interval_secs",
+            value: 0
+        })
     ));
 }
 
@@ -229,7 +238,10 @@ fn test_attestation_config_invalid_response_timeout() {
     config.response_timeout_secs = 0;
     assert!(matches!(
         config.validate(),
-        Err(ConfigError::InvalidTimeout { name: "response_timeout_secs", value: 0 })
+        Err(ConfigError::InvalidTimeout {
+            name: "response_timeout_secs",
+            value: 0
+        })
     ));
 }
 
@@ -252,7 +264,10 @@ fn test_integrity_slashing_config_invalid_double_sign_percent() {
     config.double_sign_slash_percent = 101;
     assert!(matches!(
         config.validate(),
-        Err(ConfigError::InvalidPercentage { name: "double_sign_slash_percent", value: 101 })
+        Err(ConfigError::InvalidPercentage {
+            name: "double_sign_slash_percent",
+            value: 101
+        })
     ));
 }
 
@@ -262,7 +277,10 @@ fn test_integrity_slashing_config_invalid_invalid_block_percent() {
     config.invalid_block_slash_percent = 150;
     assert!(matches!(
         config.validate(),
-        Err(ConfigError::InvalidPercentage { name: "invalid_block_slash_percent", value: 150 })
+        Err(ConfigError::InvalidPercentage {
+            name: "invalid_block_slash_percent",
+            value: 150
+        })
     ));
 }
 
@@ -272,7 +290,10 @@ fn test_integrity_slashing_config_invalid_censorship_percent() {
     config.censorship_slash_percent = 200;
     assert!(matches!(
         config.validate(),
-        Err(ConfigError::InvalidPercentage { name: "censorship_slash_percent", value: 200 })
+        Err(ConfigError::InvalidPercentage {
+            name: "censorship_slash_percent",
+            value: 200
+        })
     ));
 }
 
@@ -282,7 +303,10 @@ fn test_integrity_slashing_config_invalid_evidence_reward_percent() {
     config.evidence_reward_percent = 255;
     assert!(matches!(
         config.validate(),
-        Err(ConfigError::InvalidPercentage { name: "evidence_reward_percent", value: 255 })
+        Err(ConfigError::InvalidPercentage {
+            name: "evidence_reward_percent",
+            value: 255
+        })
     ));
 }
 
@@ -365,6 +389,9 @@ fn test_config_with_invalid_integrity() {
     config.integrity = Some(integrity);
     assert!(matches!(
         config.validate(),
-        Err(ConfigError::InvalidPercentage { name: "double_sign_slash_percent", value: 150 })
+        Err(ConfigError::InvalidPercentage {
+            name: "double_sign_slash_percent",
+            value: 150
+        })
     ));
 }

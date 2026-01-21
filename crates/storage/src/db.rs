@@ -118,7 +118,7 @@ pub struct DbSnapshot<'a> {
     db: &'a Database,
 }
 
-impl<'a> DbSnapshot<'a> {
+impl DbSnapshot<'_> {
     /// Get a value from the snapshot
     pub fn get(&self, cf_name: &str, key: &[u8]) -> Result<Option<Vec<u8>>> {
         let cf = self.db.cf_handle(cf_name)?;
@@ -136,14 +136,13 @@ pub struct DbIterator<'a> {
     inner: DBIteratorWithThreadMode<'a, DBWithThreadMode<MultiThreaded>>,
 }
 
-impl<'a> Iterator for DbIterator<'a> {
+impl Iterator for DbIterator<'_> {
     type Item = Result<(Box<[u8]>, Box<[u8]>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|result| {
-            result
-                .map_err(|e| StorageError::Database(e.to_string()))
-        })
+        self.inner
+            .next()
+            .map(|result| result.map_err(|e| StorageError::Database(e.to_string())))
     }
 }
 
@@ -187,7 +186,10 @@ impl Database {
         let db = DB::open_cf_descriptors(&opts, path, cf_descriptors)
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
-        info!("Database opened successfully with {} column families", cf::ALL.len());
+        info!(
+            "Database opened successfully with {} column families",
+            cf::ALL.len()
+        );
 
         Ok(Self {
             inner: db,
@@ -281,9 +283,11 @@ impl Database {
         let cf = self.cf_handle(cf_name)?;
         let mut read_opts = ReadOptions::default();
         read_opts.set_prefix_same_as_start(true);
-        let iter = self
-            .inner
-            .iterator_cf_opt(&cf, read_opts, IteratorMode::From(prefix, Direction::Forward));
+        let iter = self.inner.iterator_cf_opt(
+            &cf,
+            read_opts,
+            IteratorMode::From(prefix, Direction::Forward),
+        );
         Ok(DbIterator { inner: iter })
     }
 
@@ -403,4 +407,3 @@ impl Database {
         self.get(cf::METADATA, key)
     }
 }
-

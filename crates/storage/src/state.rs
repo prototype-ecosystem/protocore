@@ -345,13 +345,7 @@ impl StateDB {
     }
 
     /// Update storage diff tracking
-    fn update_storage_diff(
-        &self,
-        address: &Address,
-        slot: &Hash,
-        previous: Hash,
-        current: Hash,
-    ) {
+    fn update_storage_diff(&self, address: &Address, slot: &Hash, previous: Hash, current: Hash) {
         let mut diff = self.current_diff.write();
         if let Some(change) = diff.accounts.get_mut(address) {
             change.storage.insert(*slot, (previous, current));
@@ -498,7 +492,7 @@ impl StateDB {
 
                 // Update storage trie
                 let mut storage_tries = self.storage_tries.write();
-                let storage_trie = storage_tries.entry(*address).or_insert_with(MerkleTrie::new);
+                let storage_trie = storage_tries.entry(*address).or_default();
                 if value == ZERO_HASH {
                     let _ = storage_trie.delete(slot);
                 } else {
@@ -642,4 +636,3 @@ impl StateDB {
         self.storage_cache.write().clear();
     }
 }
-

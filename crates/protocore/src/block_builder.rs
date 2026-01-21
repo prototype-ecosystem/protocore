@@ -218,7 +218,11 @@ impl<S: BlockBuilderStorage, A: AccountStateProvider> BlockBuilder<S, A> {
     }
 
     /// Create a new block builder with full configuration
-    pub fn with_config(storage: Arc<S>, mempool: Arc<Mempool<A>>, config: BlockBuilderConfig) -> Self {
+    pub fn with_config(
+        storage: Arc<S>,
+        mempool: Arc<Mempool<A>>,
+        config: BlockBuilderConfig,
+    ) -> Self {
         Self {
             storage,
             mempool,
@@ -250,7 +254,8 @@ impl<S: BlockBuilderStorage, A: AccountStateProvider> BlockBuilder<S, A> {
         );
 
         // Execute transactions and compute new state
-        let (receipts, state_root, gas_used) = self.execute_transactions(&selected.transactions, &parent)?;
+        let (receipts, state_root, gas_used) =
+            self.execute_transactions(&selected.transactions, &parent)?;
 
         // Calculate Merkle roots
         let transactions_root = self.compute_transactions_root(&selected.transactions);
@@ -441,7 +446,7 @@ impl<S: BlockBuilderStorage, A: AccountStateProvider> BlockBuilder<S, A> {
         let sender_bytes: [u8; 20] = sender.into();
 
         Ok(TransactionData {
-            hash: B256::from(tx.hash().as_fixed_bytes().clone()),
+            hash: B256::from(*tx.hash().as_fixed_bytes()),
             from: AlloyAddress::from(sender_bytes),
             to: tx.to().map(|a| {
                 let bytes: [u8; 20] = a.into();
@@ -571,11 +576,7 @@ impl<S: BlockBuilderStorage, A: AccountStateProvider> BlockBuilder<S, A> {
                 .iter()
                 .map(|log| LogEntry {
                     address: Address::from(log.address.0 .0),
-                    topics: log
-                        .topics
-                        .iter()
-                        .map(|t| H256::from(t.0))
-                        .collect(),
+                    topics: log.topics.iter().map(|t| H256::from(t.0)).collect(),
                     data: log.data.to_vec(),
                 })
                 .collect();
@@ -587,7 +588,7 @@ impl<S: BlockBuilderStorage, A: AccountStateProvider> BlockBuilder<S, A> {
                 transaction_hash: tx.hash(),
                 transaction_index: idx as u64,
                 block_hash: H256::NIL, // Will be set after block is finalized
-                block_number: 0,        // Will be set after block is finalized
+                block_number: 0,       // Will be set after block is finalized
                 from: sender,
                 to: tx.to(),
                 cumulative_gas_used,
@@ -740,7 +741,11 @@ impl<S: BlockBuilderStorage, A: AccountStateProvider> BlockBuilder<S, A> {
     }
 
     /// Simulate transaction execution without committing state
-    pub fn simulate_transaction(&self, tx: &SignedTransaction, parent: &Block) -> Result<SimulationResult> {
+    pub fn simulate_transaction(
+        &self,
+        tx: &SignedTransaction,
+        parent: &Block,
+    ) -> Result<SimulationResult> {
         let evm_config = EvmConfig {
             chain_id: self.config.chain_id,
             block_gas_limit: self.config.block_gas_limit,

@@ -100,7 +100,9 @@ pub enum WalError {
     UnsupportedVersion(u8),
 
     /// Equivocation detected - attempting to sign conflicting message
-    #[error("equivocation detected at height {height}, round {round}: already signed {existing:?}")]
+    #[error(
+        "equivocation detected at height {height}, round {round}: already signed {existing:?}"
+    )]
     EquivocationDetected {
         /// Block height
         height: u64,
@@ -442,7 +444,6 @@ impl WalEntry {
     }
 }
 
-
 /// Recovered consensus state from WAL
 #[derive(Debug, Clone, Default)]
 pub struct RecoveredState {
@@ -620,9 +621,7 @@ impl ConsensusWal {
                 last_valid_offset, state.corrupted_entries
             );
             // Reopen in write mode to truncate
-            let file = OpenOptions::new()
-                .write(true)
-                .open(&wal_path)?;
+            let file = OpenOptions::new().write(true).open(&wal_path)?;
             file.set_len(last_valid_offset)?;
             *self.offset.lock() = last_valid_offset;
         }
@@ -938,21 +937,26 @@ impl ConsensusWal {
             // Parse and check if we should keep it
             if let Ok(entry) = WalEntry::from_bytes(&entry_data, offset) {
                 let keep = match entry.entry_type {
-                    WalEntryType::HeightStart => {
-                        entry.as_height_start().map(|p| p.height >= min_height).unwrap_or(false)
-                    }
-                    WalEntryType::VoteSigned => {
-                        entry.as_vote_signed().map(|p| p.height >= min_height).unwrap_or(false)
-                    }
-                    WalEntryType::ProposalSigned => {
-                        entry.as_proposal_signed().map(|p| p.height >= min_height).unwrap_or(false)
-                    }
-                    WalEntryType::Locked => {
-                        entry.as_locked().map(|p| p.height >= min_height).unwrap_or(false)
-                    }
-                    WalEntryType::Committed => {
-                        entry.as_committed().map(|p| p.height >= min_height).unwrap_or(false)
-                    }
+                    WalEntryType::HeightStart => entry
+                        .as_height_start()
+                        .map(|p| p.height >= min_height)
+                        .unwrap_or(false),
+                    WalEntryType::VoteSigned => entry
+                        .as_vote_signed()
+                        .map(|p| p.height >= min_height)
+                        .unwrap_or(false),
+                    WalEntryType::ProposalSigned => entry
+                        .as_proposal_signed()
+                        .map(|p| p.height >= min_height)
+                        .unwrap_or(false),
+                    WalEntryType::Locked => entry
+                        .as_locked()
+                        .map(|p| p.height >= min_height)
+                        .unwrap_or(false),
+                    WalEntryType::Committed => entry
+                        .as_committed()
+                        .map(|p| p.height >= min_height)
+                        .unwrap_or(false),
                 };
 
                 if keep {
@@ -1105,8 +1109,7 @@ fn bincode_deserialize<T: for<'de> Deserialize<'de>>(data: &[u8]) -> WalResult<T
     if data.len() < 4 + len {
         return Err(WalError::Serialization("incomplete data".to_string()));
     }
-    serde_json::from_slice(&data[4..4 + len])
-        .map_err(|e| WalError::Serialization(e.to_string()))
+    serde_json::from_slice(&data[4..4 + len]).map_err(|e| WalError::Serialization(e.to_string()))
 }
 
 #[cfg(test)]

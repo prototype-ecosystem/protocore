@@ -1,8 +1,7 @@
 //! Integration tests for participation tracking module.
 
 use protocore_consensus::{
-    AggregateStats, EpochParticipation, ParticipationSnapshot, ParticipationTracker,
-    ValidatorParticipation, BLOCK_WEIGHT, UPTIME_WEIGHT, VOTE_WEIGHT,
+    ParticipationTracker, ValidatorParticipation, BLOCK_WEIGHT, UPTIME_WEIGHT, VOTE_WEIGHT,
 };
 use protocore_types::Address;
 
@@ -238,7 +237,10 @@ fn test_snapshot_restore() {
         restored.get_metrics(&validator),
         tracker.get_metrics(&validator)
     );
-    assert_eq!(restored.get_history(&validator), tracker.get_history(&validator));
+    assert_eq!(
+        restored.get_history(&validator),
+        tracker.get_history(&validator)
+    );
 }
 
 #[test]
@@ -538,5 +540,8 @@ fn test_serde_roundtrip() {
     let restored: ParticipationTracker = serde_json::from_str(&json).unwrap();
 
     assert_eq!(restored.current_epoch(), tracker.current_epoch());
-    assert_eq!(restored.get_history(&validator), tracker.get_history(&validator));
+    assert_eq!(
+        restored.get_history(&validator),
+        tracker.get_history(&validator)
+    );
 }

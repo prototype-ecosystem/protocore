@@ -319,8 +319,7 @@ impl SnapshotManager {
                 let mut address = [0u8; 20];
                 address.copy_from_slice(&key[1..21]);
 
-                let account =
-                    Account::decode(value).unwrap_or_default();
+                let account = Account::decode(value).unwrap_or_default();
 
                 self.progress.write().processed_accounts += 1;
 
@@ -378,9 +377,7 @@ impl SnapshotManager {
             .read()
             .get(&chunk_id)
             .map(|c| c.encode())
-            .ok_or_else(|| {
-                StorageError::Snapshot(format!("Chunk {} not found", chunk_id))
-            })
+            .ok_or_else(|| StorageError::Snapshot(format!("Chunk {} not found", chunk_id)))
     }
 
     /// Import a chunk from external source
@@ -388,19 +385,29 @@ impl SnapshotManager {
         let chunk = SnapshotChunk::decode(data)?;
 
         if !chunk.verify() {
-            return Err(StorageError::Snapshot("Chunk verification failed".to_string()));
+            return Err(StorageError::Snapshot(
+                "Chunk verification failed".to_string(),
+            ));
         }
 
         self.chunks.write().insert(chunk.id, chunk.clone());
 
-        debug!("Imported chunk {} with {} updates", chunk.id, chunk.updates.len());
+        debug!(
+            "Imported chunk {} with {} updates",
+            chunk.id,
+            chunk.updates.len()
+        );
 
         Ok(chunk)
     }
 
     /// Apply a chunk to the database
     pub fn apply_chunk(&self, chunk: &SnapshotChunk) -> Result<()> {
-        debug!("Applying chunk {} with {} updates", chunk.id, chunk.updates.len());
+        debug!(
+            "Applying chunk {} with {} updates",
+            chunk.id,
+            chunk.updates.len()
+        );
 
         for update in &chunk.updates {
             match update {
@@ -408,7 +415,11 @@ impl SnapshotManager {
                     let key = self.account_key(address);
                     self.db.put(cf::STATE, &key, &account.encode())?;
                 }
-                StateUpdate::Storage { address, slot, value } => {
+                StateUpdate::Storage {
+                    address,
+                    slot,
+                    value,
+                } => {
                     let key = self.storage_key(address, slot);
                     if *value == ZERO_HASH {
                         self.db.delete(cf::STATE, &key)?;
@@ -508,4 +519,3 @@ impl SnapshotManager {
         key
     }
 }
-

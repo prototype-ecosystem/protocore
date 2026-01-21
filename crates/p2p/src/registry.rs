@@ -221,8 +221,8 @@ impl Default for NetworkParams {
         Self {
             min_validator_stake: 10_000_000_000_000_000_000, // 1000 tokens
             max_validators: 100,
-            epoch_length: 28_800, // ~1 day at 3s blocks
-            inflation_rate_bp: 800, // 8%
+            epoch_length: 28_800,         // ~1 day at 3s blocks
+            inflation_rate_bp: 800,       // 8%
             min_gas_price: 1_000_000_000, // 1 gwei
             block_gas_limit: 30_000_000,
         }
@@ -676,10 +676,7 @@ mod tests {
 
         assert_eq!(NetworkId::from_str("mainnet"), Some(NetworkId::Mainnet));
         assert_eq!(NetworkId::from_str("testnet"), Some(NetworkId::Testnet));
-        assert_eq!(
-            NetworkId::from_str("12345"),
-            Some(NetworkId::Custom(12345))
-        );
+        assert_eq!(NetworkId::from_str("12345"), Some(NetworkId::Custom(12345)));
     }
 
     #[test]
@@ -746,8 +743,7 @@ mod tests {
 
     #[test]
     fn test_registry_config() {
-        let config = RegistryConfig::default()
-            .with_url("https://custom.registry.com");
+        let config = RegistryConfig::default().with_url("https://custom.registry.com");
 
         assert_eq!(config.base_url, "https://custom.registry.com");
         assert!(config.enable_cache);

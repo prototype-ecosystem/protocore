@@ -172,12 +172,12 @@ impl Default for GasConfig {
     fn default() -> Self {
         Self {
             costs: GasCosts::default(),
-            min_gas_price: 1_000_000_000, // 1 gwei
-            min_base_fee: 1_000_000_000,  // 1 gwei
+            min_gas_price: 1_000_000_000,        // 1 gwei
+            min_base_fee: 1_000_000_000,         // 1 gwei
             max_base_fee: 1_000_000_000_000_000, // 1000 gwei
-            base_fee_change_denominator: 8, // 12.5% max change
-            elasticity_multiplier: 2,      // 50% target
-            max_refund_quotient: 5,        // Max 20% refund
+            base_fee_change_denominator: 8,      // 12.5% max change
+            elasticity_multiplier: 2,            // 50% target
+            max_refund_quotient: 5,              // Max 20% refund
         }
     }
 }

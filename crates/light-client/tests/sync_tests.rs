@@ -1,9 +1,10 @@
 //! Tests for header synchronization
 
+use parking_lot::RwLock;
 use protocore_light_client::{
     client::{
-        Checkpoint, FinalityCertificate, HeaderChain, LightBlockHeader, ValidatorInfo,
-        ValidatorSet, ValidatorSignature, ValidatorTracker,
+        FinalityCertificate, HeaderChain, LightBlockHeader, ValidatorInfo, ValidatorSet,
+        ValidatorSignature, ValidatorTracker,
     },
     constants::{DEFAULT_EPOCH_LENGTH, MAX_HEADERS_PER_SYNC},
     sync::{
@@ -13,7 +14,6 @@ use protocore_light_client::{
     types::Hash,
     Error,
 };
-use parking_lot::RwLock;
 use std::sync::Arc;
 
 fn create_test_header(number: u64, parent_hash: Hash) -> LightBlockHeader {

@@ -216,11 +216,7 @@ impl PruningManager {
             return Ok(PruningStats::default()); // Nothing to prune
         }
 
-        info!(
-            from_height = lowest,
-            to_height = target,
-            "Starting pruning"
-        );
+        info!(from_height = lowest, to_height = target, "Starting pruning");
 
         let mut stats = PruningStats::default();
         let mut current = lowest;
@@ -330,8 +326,8 @@ impl PruningManager {
             .collect();
 
         // Add auto-checkpoints
-        let mut auto_checkpoint = (start / self.config.checkpoint_interval + 1)
-            * self.config.checkpoint_interval;
+        let mut auto_checkpoint =
+            (start / self.config.checkpoint_interval + 1) * self.config.checkpoint_interval;
         while auto_checkpoint <= end {
             if !result.contains(&auto_checkpoint) {
                 result.push(auto_checkpoint);
@@ -346,8 +342,8 @@ impl PruningManager {
     /// Get the nearest checkpoint at or before a given height
     pub fn nearest_checkpoint(&self, height: u64) -> u64 {
         // Find the nearest auto-checkpoint
-        let auto_checkpoint = (height / self.config.checkpoint_interval)
-            * self.config.checkpoint_interval;
+        let auto_checkpoint =
+            (height / self.config.checkpoint_interval) * self.config.checkpoint_interval;
 
         // Check manual checkpoints
         let checkpoints = self.checkpoints.read();

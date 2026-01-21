@@ -140,12 +140,14 @@ fn test_verify_proof_of_possession_helper() {
 
 #[test]
 fn test_batch_verify_proofs_of_possession() {
-    let keypairs: Vec<_> = (0..5).map(|_| {
-        let sk = BlsPrivateKey::random();
-        let pk = sk.public_key();
-        let pop = sk.generate_proof_of_possession();
-        (pk, pop)
-    }).collect();
+    let keypairs: Vec<_> = (0..5)
+        .map(|_| {
+            let sk = BlsPrivateKey::random();
+            let pk = sk.public_key();
+            let pop = sk.generate_proof_of_possession();
+            (pk, pop)
+        })
+        .collect();
 
     let refs: Vec<_> = keypairs.iter().map(|(pk, pop)| (pk, pop)).collect();
     assert!(batch_verify_proofs_of_possession(&refs));
@@ -153,12 +155,14 @@ fn test_batch_verify_proofs_of_possession() {
 
 #[test]
 fn test_batch_verify_proofs_of_possession_fails_with_invalid() {
-    let mut keypairs: Vec<_> = (0..5).map(|_| {
-        let sk = BlsPrivateKey::random();
-        let pk = sk.public_key();
-        let pop = sk.generate_proof_of_possession();
-        (pk, pop)
-    }).collect();
+    let mut keypairs: Vec<_> = (0..5)
+        .map(|_| {
+            let sk = BlsPrivateKey::random();
+            let pk = sk.public_key();
+            let pop = sk.generate_proof_of_possession();
+            (pk, pop)
+        })
+        .collect();
 
     // Replace one PoP with an invalid one
     let wrong_sk = BlsPrivateKey::random();
@@ -348,7 +352,10 @@ fn test_aggregate_with_domain() {
     let pubkeys: Vec<_> = keys.iter().map(|k| k.public_key()).collect();
     let message = b"consensus message";
 
-    let signatures: Vec<_> = keys.iter().map(|k| k.sign_with_domain(message, &domain)).collect();
+    let signatures: Vec<_> = keys
+        .iter()
+        .map(|k| k.sign_with_domain(message, &domain))
+        .collect();
     let sig_refs: Vec<_> = signatures.iter().collect();
 
     let aggregate = BlsSignature::aggregate_with_domain(&sig_refs, &domain).unwrap();
@@ -399,7 +406,10 @@ fn test_aggregate_sorted_with_domain() {
     let pubkeys: Vec<_> = keys.iter().map(|k| k.public_key()).collect();
     let message = b"finality message";
 
-    let signatures: Vec<_> = keys.iter().map(|k| k.sign_with_domain(message, &domain)).collect();
+    let signatures: Vec<_> = keys
+        .iter()
+        .map(|k| k.sign_with_domain(message, &domain))
+        .collect();
 
     // Create signed messages in random order
     let signed_messages: Vec<_> = pubkeys.iter().zip(signatures.iter()).collect();
@@ -418,7 +428,10 @@ fn test_aggregate_sorted_deterministic() {
     let pubkeys: Vec<_> = keys.iter().map(|k| k.public_key()).collect();
     let message = b"finality message";
 
-    let signatures: Vec<_> = keys.iter().map(|k| k.sign_with_domain(message, &domain)).collect();
+    let signatures: Vec<_> = keys
+        .iter()
+        .map(|k| k.sign_with_domain(message, &domain))
+        .collect();
 
     // Create signed messages in different orders
     let order1: Vec<_> = pubkeys.iter().zip(signatures.iter()).collect();
@@ -429,8 +442,14 @@ fn test_aggregate_sorted_deterministic() {
 
     // Results should be identical regardless of input order
     assert_eq!(
-        sorted_pks1.iter().map(|pk| pk.to_bytes()).collect::<Vec<_>>(),
-        sorted_pks2.iter().map(|pk| pk.to_bytes()).collect::<Vec<_>>()
+        sorted_pks1
+            .iter()
+            .map(|pk| pk.to_bytes())
+            .collect::<Vec<_>>(),
+        sorted_pks2
+            .iter()
+            .map(|pk| pk.to_bytes())
+            .collect::<Vec<_>>()
     );
     assert_eq!(aggregate1.to_bytes(), aggregate2.to_bytes());
 }
@@ -459,7 +478,10 @@ fn test_fast_aggregate_verify_with_domain() {
     let pubkey_bytes: Vec<[u8; 48]> = keys.iter().map(|k| k.public_key().to_bytes()).collect();
     let message = b"fast verify test";
 
-    let signatures: Vec<_> = keys.iter().map(|k| k.sign_with_domain(message, &domain)).collect();
+    let signatures: Vec<_> = keys
+        .iter()
+        .map(|k| k.sign_with_domain(message, &domain))
+        .collect();
     let sig_refs: Vec<_> = signatures.iter().collect();
 
     let aggregate = BlsSignature::aggregate_with_domain(&sig_refs, &domain).unwrap();
@@ -518,7 +540,9 @@ fn test_validator_keypair_sign_with_domain() {
 
 #[test]
 fn test_public_key_ordering() {
-    let keys: Vec<_> = (0..10).map(|_| BlsPrivateKey::random().public_key()).collect();
+    let keys: Vec<_> = (0..10)
+        .map(|_| BlsPrivateKey::random().public_key())
+        .collect();
 
     let mut sorted = keys.clone();
     sorted.sort();
@@ -541,7 +565,9 @@ fn test_aggregate_public_keys() {
 
 #[test]
 fn test_aggregate_public_keys_sorted() {
-    let keys: Vec<_> = (0..5).map(|_| BlsPrivateKey::random().public_key()).collect();
+    let keys: Vec<_> = (0..5)
+        .map(|_| BlsPrivateKey::random().public_key())
+        .collect();
     let pk_refs: Vec<_> = keys.iter().collect();
 
     // Different input orders should produce same result
@@ -630,7 +656,11 @@ fn test_bls_verify_aggregate_helper() {
     let sig_bytes: Vec<[u8; 96]> = signatures.iter().map(|s| s.to_bytes()).collect();
 
     let aggregate_bytes = bls_aggregate(&sig_bytes).unwrap();
-    assert!(bls_verify_aggregate(&pubkey_bytes, &message, &aggregate_bytes));
+    assert!(bls_verify_aggregate(
+        &pubkey_bytes,
+        &message,
+        &aggregate_bytes
+    ));
 }
 
 // ============================================================================

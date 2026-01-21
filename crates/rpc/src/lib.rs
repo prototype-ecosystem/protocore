@@ -39,7 +39,13 @@ pub mod types;
 pub mod ws;
 
 // Re-export main types at crate root
-pub use eth::{EthApiImpl, EthApiServer, NetApiImpl, NetApiServer, StateProvider, Web3ApiImpl, Web3ApiServer};
+pub use ddos::{
+    ApiTier, CircuitState, MethodCosts, RateLimitResult, RpcDdosConfig, RpcDdosProtection,
+    RpcDdosStats, RpcRejectReason,
+};
+pub use eth::{
+    EthApiImpl, EthApiServer, NetApiImpl, NetApiServer, StateProvider, Web3ApiImpl, Web3ApiServer,
+};
 pub use protocore::{
     DelegationInfo, EpochInfo, FinalityCert, GovernanceProposal, NetworkStats, ProposalStatus,
     ProposalType, ProtocoreApiImpl, ProtocoreApiServer, ProtocoreStateProvider, StakingInfo,
@@ -48,10 +54,6 @@ pub use protocore::{
 pub use server::{RpcServer, RpcServerBuilder, RpcServerConfig};
 pub use types::*;
 pub use ws::{SubscriptionApiImpl, SubscriptionApiServer, SubscriptionManager};
-pub use ddos::{
-    ApiTier, CircuitState, MethodCosts, RateLimitResult, RpcDdosConfig, RpcDdosProtection,
-    RpcDdosStats, RpcRejectReason,
-};
 
 /// Result type alias for RPC operations
 pub type Result<T> = std::result::Result<T, RpcError>;

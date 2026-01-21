@@ -125,61 +125,63 @@ pub use participation::{
     AggregateStats, EpochParticipation, ParticipationSnapshot, ParticipationTracker,
     ValidatorParticipation, BLOCK_WEIGHT, UPTIME_WEIGHT, VOTE_WEIGHT,
 };
-pub use randomness::{BlockRandomness, RandomnessBeacon, RandomnessBeaconSnapshot, RandomnessError};
+pub use randomness::{
+    BlockRandomness, RandomnessBeacon, RandomnessBeaconSnapshot, RandomnessError,
+};
 pub use timeout::{BackoffMode, TimeoutConfig, TimeoutInfo, TimeoutMetrics, TimeoutScheduler};
 pub use types::{
-    CommittedBlock, ConsensusMessage, FinalityCert, Proposal, Step, ValidatorId, ValidatorSet,
-    Validator, Vote, VoteType, NIL_HASH, domains,
+    domains, CommittedBlock, ConsensusMessage, FinalityCert, Proposal, Step, Validator,
+    ValidatorId, ValidatorSet, Vote, VoteType, NIL_HASH,
 };
 pub use vote_set::{HeightVoteSet, VoteSet, VoteSetError};
 // Deferred to phase2/:
 // pub use inverse_rewards::{...};
 // pub use integrity::{...};
-pub use sybil::{
-    AppealState, AppealStatus, ConfidenceLevel, SignalType, SybilConfig, SybilDetector,
-    SybilSignal, SybilStatus,
-};
-pub use proposer::{
-    ProposerConfig, ProposerError, ProposerResult, ProposerSelection, ProposerSelector,
-    ProposerSnapshot, ProposerStats,
-};
-pub use evidence::{
-    EquivocationDetector, EquivocationEvidence, EvidenceError, EvidencePool,
-    EVIDENCE_MAX_AGE_BLOCKS,
-};
-pub use state_machine::{
-    CommitHistory, ConsensusEvent, ConsensusStateMachine, StateMachineError,
-    StateMachineResult, StateMachineSnapshot, VotePhase,
+pub use ddos::{
+    ConsensusDdosConfig, ConsensusDdosProtection, ConsensusDdosStats, ConsensusMessageType,
+    ConsensusRejectReason, ConsensusValidationResult,
 };
 pub use deduplication::{
-    CacheStats, DeduplicationConfig, DeduplicationResult, MessageDeduplicationCache,
-    MessageId, compute_message_id, compute_proposal_id, compute_vote_id,
-};
-pub use signing_coordinator::{
-    LeaderLease, SigningCoordinator, SigningCoordinatorConfig, SigningCoordinatorError,
-    SigningKey, SigningLockGuard, SigningRecord, SigningRole,
-    DEFAULT_LEASE_DURATION_MS, DEFAULT_LEASE_RENEWAL_THRESHOLD_MS,
-    DEFAULT_MISSED_BLOCKS_THRESHOLD, DEFAULT_TAKEOVER_TIMEOUT_MS,
-};
-pub use types::ChainContext;
-pub use wal::{
-    ConsensusWal, RecoveredState, WalConfig, WalEntry, WalEntryType, WalError, WalResult,
-    CommittedPayload, HeightStartPayload, LockedPayload, ProposalSignedPayload, VoteSignedPayload,
+    compute_message_id, compute_proposal_id, compute_vote_id, CacheStats, DeduplicationConfig,
+    DeduplicationResult, MessageDeduplicationCache, MessageId,
 };
 pub use epoch::{
     compute_validator_set_hash, EpochConfig, EpochError, EpochInfo, EpochManager,
     EpochManagerSnapshot, EpochNumber, EpochResult, EpochValidatorSet, ValidatorSetBuilder,
     DEFAULT_EPOCH_LENGTH, MAX_EPOCH_LENGTH, MIN_EPOCH_LENGTH,
 };
-pub use light_client::{
-    BisectionHelper, LightClientError, LightClientResult, LightClientSnapshot, LightClientState,
-    TrustedHeader, ValidatorSetProof, DEFAULT_TRUST_PERIOD_SECS, MAX_SEQUENTIAL_VERIFY_HEIGHT,
-};
-pub use ddos::{
-    ConsensusDdosConfig, ConsensusDdosProtection, ConsensusDdosStats, ConsensusMessageType,
-    ConsensusRejectReason, ConsensusValidationResult,
+pub use evidence::{
+    EquivocationDetector, EquivocationEvidence, EvidenceError, EvidencePool,
+    EVIDENCE_MAX_AGE_BLOCKS,
 };
 pub use fork_choice::{
     ChainHead, ChainSelector, CommitRules, ForkChoiceError, ForkChoiceResult, ForkChoiceRule,
     ForkChoiceState,
+};
+pub use light_client::{
+    BisectionHelper, LightClientError, LightClientResult, LightClientSnapshot, LightClientState,
+    TrustedHeader, ValidatorSetProof, DEFAULT_TRUST_PERIOD_SECS, MAX_SEQUENTIAL_VERIFY_HEIGHT,
+};
+pub use proposer::{
+    ProposerConfig, ProposerError, ProposerResult, ProposerSelection, ProposerSelector,
+    ProposerSnapshot, ProposerStats,
+};
+pub use signing_coordinator::{
+    LeaderLease, SigningCoordinator, SigningCoordinatorConfig, SigningCoordinatorError, SigningKey,
+    SigningLockGuard, SigningRecord, SigningRole, DEFAULT_LEASE_DURATION_MS,
+    DEFAULT_LEASE_RENEWAL_THRESHOLD_MS, DEFAULT_MISSED_BLOCKS_THRESHOLD,
+    DEFAULT_TAKEOVER_TIMEOUT_MS,
+};
+pub use state_machine::{
+    CommitHistory, ConsensusEvent, ConsensusStateMachine, StateMachineError, StateMachineResult,
+    StateMachineSnapshot, VotePhase,
+};
+pub use sybil::{
+    AppealState, AppealStatus, ConfidenceLevel, SignalType, SybilConfig, SybilDetector,
+    SybilSignal, SybilStatus,
+};
+pub use types::ChainContext;
+pub use wal::{
+    CommittedPayload, ConsensusWal, HeightStartPayload, LockedPayload, ProposalSignedPayload,
+    RecoveredState, VoteSignedPayload, WalConfig, WalEntry, WalEntryType, WalError, WalResult,
 };

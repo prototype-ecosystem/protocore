@@ -7,11 +7,9 @@
 //! - Validator information
 
 use clap::{Parser, Subcommand};
-use std::time::Duration;
 
 use crate::utils::{
-    format_balance, format_timestamp, CliError, CliResult, OutputFormat, RpcClient,
-    print_info, print_error,
+    format_balance, format_timestamp, print_info, CliError, CliResult, OutputFormat, RpcClient,
 };
 
 /// Query subcommands
@@ -211,7 +209,10 @@ async fn execute_block(args: BlockArgs, output_format: OutputFormat) -> CliResul
             println!("  State Root:      {}", block.state_root);
             println!("  Tx Root:         {}", block.transactions_root);
             println!("  Receipts Root:   {}", block.receipts_root);
-            println!("  Gas Used:        {} / {}", block.gas_used, block.gas_limit);
+            println!(
+                "  Gas Used:        {} / {}",
+                block.gas_used, block.gas_limit
+            );
             println!("  Transactions:    {}", block.transactions.len());
 
             if args.full && !block.transactions.is_empty() {
@@ -232,7 +233,9 @@ async fn execute_tx(args: TxArgs, output_format: OutputFormat) -> CliResult<()> 
     let client = RpcClient::new(&args.rpc)?;
 
     if !args.hash.starts_with("0x") || args.hash.len() != 66 {
-        return Err(CliError::InvalidArgument("Invalid transaction hash format".to_string()));
+        return Err(CliError::InvalidArgument(
+            "Invalid transaction hash format".to_string(),
+        ));
     }
 
     print_info(&format!("Querying transaction {}...", &args.hash[..18]));
@@ -247,10 +250,19 @@ async fn execute_tx(args: TxArgs, output_format: OutputFormat) -> CliResult<()> 
             println!("Transaction Information");
             println!("=======================");
             println!("  Hash:            {}", tx.hash);
-            println!("  Status:          {}", if tx.status { "Success" } else { "Failed" });
-            println!("  Block:           {} (index {})", tx.block_number, tx.transaction_index);
+            println!(
+                "  Status:          {}",
+                if tx.status { "Success" } else { "Failed" }
+            );
+            println!(
+                "  Block:           {} (index {})",
+                tx.block_number, tx.transaction_index
+            );
             println!("  From:            {}", tx.from);
-            println!("  To:              {}", tx.to.as_deref().unwrap_or("Contract Creation"));
+            println!(
+                "  To:              {}",
+                tx.to.as_deref().unwrap_or("Contract Creation")
+            );
             println!("  Value:           {}", format_balance(&tx.value));
             println!("  Gas:             {} / {}", tx.gas_used, tx.gas);
             println!("  Gas Price:       {} Gwei", tx.gas_price / 1_000_000_000);
@@ -269,11 +281,17 @@ async fn execute_account(args: AccountArgs, output_format: OutputFormat) -> CliR
     let client = RpcClient::new(&args.rpc)?;
 
     if !args.address.starts_with("0x") || args.address.len() != 42 {
-        return Err(CliError::InvalidArgument("Invalid address format".to_string()));
+        return Err(CliError::InvalidArgument(
+            "Invalid address format".to_string(),
+        ));
     }
 
     let block = args.block.as_deref().unwrap_or("latest");
-    print_info(&format!("Querying account {} at block {}...", &args.address[..10], block));
+    print_info(&format!(
+        "Querying account {} at block {}...",
+        &args.address[..10],
+        block
+    ));
 
     let account = client.get_account(&args.address, block).await?;
 
@@ -318,8 +336,10 @@ async fn execute_validators(args: ValidatorsArgs, output_format: OutputFormat) -
             println!("Validators ({} total)", validators.len());
             println!("=================");
             println!();
-            println!("{:<6} {:<44} {:<20} {:<10} {:<12}",
-                "RANK", "ADDRESS", "STAKE", "COMM %", "STATUS");
+            println!(
+                "{:<6} {:<44} {:<20} {:<10} {:<12}",
+                "RANK", "ADDRESS", "STAKE", "COMM %", "STATUS"
+            );
             println!("{}", "-".repeat(94));
 
             for (i, v) in validators.iter().enumerate() {
@@ -371,11 +391,17 @@ async fn execute_status(args: StatusArgs, output_format: OutputFormat) -> CliRes
             println!("  Network:         {}", status.network_name);
             println!("  Block Height:    {}", status.block_height);
             println!("  Block Hash:      {}", status.latest_block_hash);
-            println!("  Block Time:      {}", format_timestamp(status.latest_block_time));
+            println!(
+                "  Block Time:      {}",
+                format_timestamp(status.latest_block_time)
+            );
             println!();
             println!("Network:");
             println!("  Peers:           {}", status.peer_count);
-            println!("  Syncing:         {}", if status.syncing { "Yes" } else { "No" });
+            println!(
+                "  Syncing:         {}",
+                if status.syncing { "Yes" } else { "No" }
+            );
             if status.syncing {
                 println!("  Sync Progress:   {:.2}%", status.sync_progress * 100.0);
             }
@@ -395,22 +421,29 @@ async fn execute_pending(args: PendingArgs, output_format: OutputFormat) -> CliR
 
     print_info("Querying pending transactions...");
 
-    let pending = client.get_pending_transactions(args.limit, args.from.as_deref()).await?;
+    let pending = client
+        .get_pending_transactions(args.limit, args.from.as_deref())
+        .await?;
 
     match output_format {
         OutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&pending)?);
         }
         OutputFormat::Text => {
-            println!("Pending Transactions ({} found)", pending.transactions.len());
+            println!(
+                "Pending Transactions ({} found)",
+                pending.transactions.len()
+            );
             println!("======================");
 
             if pending.transactions.is_empty() {
                 println!("No pending transactions.");
             } else {
                 println!();
-                println!("{:<66} {:<44} {:<20} {:<10}",
-                    "HASH", "FROM", "VALUE", "GAS");
+                println!(
+                    "{:<66} {:<44} {:<20} {:<10}",
+                    "HASH", "FROM", "VALUE", "GAS"
+                );
                 println!("{}", "-".repeat(142));
 
                 for tx in &pending.transactions {
@@ -425,8 +458,10 @@ async fn execute_pending(args: PendingArgs, output_format: OutputFormat) -> CliR
             }
 
             println!();
-            println!("Mempool: {} pending, {} queued",
-                pending.pending_count, pending.queued_count);
+            println!(
+                "Mempool: {} pending, {} queued",
+                pending.pending_count, pending.queued_count
+            );
         }
     }
 
@@ -438,7 +473,9 @@ async fn execute_receipt(args: ReceiptArgs, output_format: OutputFormat) -> CliR
     let client = RpcClient::new(&args.rpc)?;
 
     if !args.hash.starts_with("0x") || args.hash.len() != 66 {
-        return Err(CliError::InvalidArgument("Invalid transaction hash format".to_string()));
+        return Err(CliError::InvalidArgument(
+            "Invalid transaction hash format".to_string(),
+        ));
     }
 
     print_info(&format!("Querying receipt for {}...", &args.hash[..18]));
@@ -453,12 +490,18 @@ async fn execute_receipt(args: ReceiptArgs, output_format: OutputFormat) -> CliR
             println!("Transaction Receipt");
             println!("===================");
             println!("  Transaction Hash:  {}", receipt.transaction_hash);
-            println!("  Status:            {}", if receipt.status { "Success" } else { "Failed" });
+            println!(
+                "  Status:            {}",
+                if receipt.status { "Success" } else { "Failed" }
+            );
             println!("  Block Number:      {}", receipt.block_number);
             println!("  Block Hash:        {}", receipt.block_hash);
             println!("  Transaction Index: {}", receipt.transaction_index);
             println!("  From:              {}", receipt.from);
-            println!("  To:                {}", receipt.to.as_deref().unwrap_or("Contract Creation"));
+            println!(
+                "  To:                {}",
+                receipt.to.as_deref().unwrap_or("Contract Creation")
+            );
             if let Some(ref addr) = receipt.contract_address {
                 println!("  Contract Created:  {}", addr);
             }
@@ -486,26 +529,38 @@ async fn execute_code(args: CodeArgs, output_format: OutputFormat) -> CliResult<
     let client = RpcClient::new(&args.rpc)?;
 
     if !args.address.starts_with("0x") || args.address.len() != 42 {
-        return Err(CliError::InvalidArgument("Invalid address format".to_string()));
+        return Err(CliError::InvalidArgument(
+            "Invalid address format".to_string(),
+        ));
     }
 
     let block = args.block.as_deref().unwrap_or("latest");
-    print_info(&format!("Querying code at {} at block {}...", &args.address[..10], block));
+    print_info(&format!(
+        "Querying code at {} at block {}...",
+        &args.address[..10],
+        block
+    ));
 
     let code = client.get_code(&args.address, block).await?;
 
     match output_format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "address": args.address,
-                "block": block,
-                "code": code.code,
-                "size": code.size,
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "address": args.address,
+                    "block": block,
+                    "code": code.code,
+                    "size": code.size,
+                }))?
+            );
         }
         OutputFormat::Text => {
             if code.code == "0x" {
-                println!("No code at address {} (EOA or empty contract)", args.address);
+                println!(
+                    "No code at address {} (EOA or empty contract)",
+                    args.address
+                );
             } else {
                 println!("Contract Code at {}", args.address);
                 println!("Code Size: {} bytes", code.size);
@@ -513,7 +568,11 @@ async fn execute_code(args: CodeArgs, output_format: OutputFormat) -> CliResult<
                 if code.size <= 1000 {
                     println!("{}", code.code);
                 } else {
-                    println!("{}... (truncated, {} bytes total)", &code.code[..200], code.size);
+                    println!(
+                        "{}... (truncated, {} bytes total)",
+                        &code.code[..200],
+                        code.size
+                    );
                 }
             }
         }
@@ -527,23 +586,32 @@ async fn execute_storage(args: StorageArgs, output_format: OutputFormat) -> CliR
     let client = RpcClient::new(&args.rpc)?;
 
     if !args.address.starts_with("0x") || args.address.len() != 42 {
-        return Err(CliError::InvalidArgument("Invalid address format".to_string()));
+        return Err(CliError::InvalidArgument(
+            "Invalid address format".to_string(),
+        ));
     }
 
     let block = args.block.as_deref().unwrap_or("latest");
-    print_info(&format!("Querying storage at {} slot {} at block {}...",
-        &args.address[..10], &args.slot, block));
+    print_info(&format!(
+        "Querying storage at {} slot {} at block {}...",
+        &args.address[..10],
+        &args.slot,
+        block
+    ));
 
     let value = client.get_storage(&args.address, &args.slot, block).await?;
 
     match output_format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "address": args.address,
-                "slot": args.slot,
-                "block": block,
-                "value": value,
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "address": args.address,
+                    "slot": args.slot,
+                    "block": block,
+                    "value": value,
+                }))?
+            );
         }
         OutputFormat::Text => {
             println!("Storage Query Result");
@@ -574,7 +642,8 @@ fn parse_block_param(block: &str) -> CliResult<BlockParam> {
             }
         }
         s => {
-            let num: u64 = s.parse()
+            let num: u64 = s
+                .parse()
                 .map_err(|_| CliError::InvalidArgument("Invalid block number".to_string()))?;
             Ok(BlockParam::Number(num))
         }
@@ -715,4 +784,3 @@ pub struct CodeResponse {
     pub code: String,
     pub size: usize,
 }
-

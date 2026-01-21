@@ -24,11 +24,10 @@
 //! - Rejecting headers that don't build on the verified chain
 
 use crate::client::{
-    Checkpoint, FinalityCertificate, HeaderChain, LightBlockHeader, LightClient, ValidatorSet,
-    ValidatorTracker,
+    Checkpoint, FinalityCertificate, HeaderChain, LightBlockHeader, LightClient, ValidatorTracker,
 };
 use crate::constants::MAX_HEADERS_PER_SYNC;
-use crate::types::{BlockHeight, Epoch, Hash};
+use crate::types::{BlockHeight, Hash};
 use crate::{Error, Result};
 use async_trait::async_trait;
 use parking_lot::RwLock;
@@ -419,10 +418,7 @@ impl<F: HeaderFetcher> HeaderSync<F> {
             return Ok(());
         }
 
-        info!(
-            "Starting sync from {} to {}",
-            start_height, target_height
-        );
+        info!("Starting sync from {} to {}", start_height, target_height);
 
         let sync_start = Instant::now();
 
@@ -772,4 +768,3 @@ pub fn handle_reorg(
 
     Ok(())
 }
-

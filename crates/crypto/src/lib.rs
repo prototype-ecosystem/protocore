@@ -35,14 +35,14 @@ pub mod vrf;
 
 // Re-export commonly used items
 pub use bls::{
-    BlsPrivateKey, BlsPublicKey, BlsSignature, BlsProofOfPossession,
-    DomainTag, MessageType, ValidatorKeyPair,
-    aggregate_sorted_with_domain, verify_proof_of_possession, batch_verify_proofs_of_possession,
+    aggregate_sorted_with_domain, batch_verify_proofs_of_possession, verify_proof_of_possession,
+    BlsPrivateKey, BlsProofOfPossession, BlsPublicKey, BlsSignature, DomainTag, MessageType,
+    ValidatorKeyPair,
 };
 pub use ecdsa::{Address, PrivateKey, PublicKey, Signature};
 pub use hash::{keccak256, keccak256_concat, Hasher};
 pub use schnorr::{batch_verify, SchnorrPublicKey, SchnorrSecretKey, SchnorrSignature};
-pub use vrf::{VrfSecretKey, VrfPublicKey, VrfProof, VrfOutput};
+pub use vrf::{VrfOutput, VrfProof, VrfPublicKey, VrfSecretKey};
 
 /// Common type alias for 32-byte hash
 pub type Hash = [u8; 32];

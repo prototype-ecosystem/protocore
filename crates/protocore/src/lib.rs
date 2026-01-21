@@ -68,8 +68,8 @@ pub mod validator;
 
 // Re-export main types at crate root
 pub use block_builder::{
-    BlockBuilder, BlockBuilderConfig, BlockBuilderStorage, BlockReceipt, LogEntry,
-    SimpleStorage, SimulationResult,
+    BlockBuilder, BlockBuilderConfig, BlockBuilderStorage, BlockReceipt, LogEntry, SimpleStorage,
+    SimulationResult,
 };
 pub use node::{Node, NodeEvent, NodeStatus};
 pub use validator::{ValidatorKeys, ValidatorNode, ValidatorStats};
@@ -88,7 +88,7 @@ pub mod prelude {
     //! Commonly used types for convenience
     pub use super::{BlockBuilder, Node, NodeEvent, NodeStatus, ValidatorNode};
     pub use protocore_config::Config;
-    pub use protocore_types::{Address, Block, BlockHeader, H256, Transaction};
+    pub use protocore_types::{Address, Block, BlockHeader, Transaction, H256};
 }
 
 #[cfg(test)]

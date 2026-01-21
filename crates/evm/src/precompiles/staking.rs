@@ -23,16 +23,14 @@ use sha3::{Digest, Keccak256};
 use std::collections::HashMap;
 use tracing::{debug, info};
 
-use super::{
-    abi, staking_selectors, PrecompileError, PrecompileOutput, STAKING_ADDRESS,
-};
+use super::{abi, staking_selectors, PrecompileError, PrecompileOutput, STAKING_ADDRESS};
 use crate::state_adapter::StateAdapter;
 
 /// Minimum stake required to become a validator (100,000 MCN)
 pub const MIN_VALIDATOR_STAKE: u128 = 100_000 * 10u128.pow(18);
 
 /// Minimum delegation amount (1 MCN)
-pub const MIN_DELEGATION: u128 = 1 * 10u128.pow(18);
+pub const MIN_DELEGATION: u128 = 10u128.pow(18);
 
 /// Maximum number of active validators
 pub const MAX_VALIDATORS: u32 = 51;
@@ -214,27 +212,15 @@ impl StakingPrecompile {
             staking_selectors::CREATE_VALIDATOR => {
                 Self::create_validator(caller, data, value, block_number, db)
             }
-            staking_selectors::DELEGATE => {
-                Self::delegate(caller, data, value, block_number, db)
-            }
-            staking_selectors::UNDELEGATE => {
-                Self::undelegate(caller, data, block_number, db)
-            }
-            staking_selectors::REDELEGATE => {
-                Self::redelegate(caller, data, block_number, db)
-            }
-            staking_selectors::CLAIM_REWARDS => {
-                Self::claim_rewards(caller, db)
-            }
+            staking_selectors::DELEGATE => Self::delegate(caller, data, value, block_number, db),
+            staking_selectors::UNDELEGATE => Self::undelegate(caller, data, block_number, db),
+            staking_selectors::REDELEGATE => Self::redelegate(caller, data, block_number, db),
+            staking_selectors::CLAIM_REWARDS => Self::claim_rewards(caller, db),
             staking_selectors::WITHDRAW_UNBONDED => {
                 Self::withdraw_unbonded(caller, block_number, db)
             }
-            staking_selectors::GET_VALIDATOR => {
-                Self::get_validator(data, db)
-            }
-            staking_selectors::GET_STAKE => {
-                Self::get_stake(data, db)
-            }
+            staking_selectors::GET_VALIDATOR => Self::get_validator(data, db),
+            staking_selectors::GET_STAKE => Self::get_stake(data, db),
             // Multi-validator delegation functions
             staking_selectors::BATCH_DELEGATE => {
                 Self::batch_delegate(caller, data, value, block_number, db)
@@ -242,9 +228,7 @@ impl StakingPrecompile {
             staking_selectors::SPLIT_DELEGATE => {
                 Self::split_delegate(caller, data, value, block_number, db)
             }
-            staking_selectors::GET_ALL_DELEGATIONS => {
-                Self::get_all_delegations(data, db)
-            }
+            staking_selectors::GET_ALL_DELEGATIONS => Self::get_all_delegations(data, db),
             staking_selectors::AUTO_REBALANCE => {
                 Self::auto_rebalance(caller, data, block_number, db)
             }
@@ -300,7 +284,10 @@ impl StakingPrecompile {
 
         // Validate commission
         if commission > MAX_COMMISSION {
-            return Err(PrecompileError::InvalidCommission(commission, MAX_COMMISSION));
+            return Err(PrecompileError::InvalidCommission(
+                commission,
+                MAX_COMMISSION,
+            ));
         }
 
         // Get pubkey bytes
@@ -449,7 +436,8 @@ impl StakingPrecompile {
             .ok_or_else(|| PrecompileError::InvalidInput("expected validator address".into()))?;
         let amount_u256 = abi::decode_u256(data, 32)
             .ok_or_else(|| PrecompileError::InvalidInput("expected amount".into()))?;
-        let amount = amount_u256.as_limbs()[0] as u128 | ((amount_u256.as_limbs()[1] as u128) << 64);
+        let amount =
+            amount_u256.as_limbs()[0] as u128 | ((amount_u256.as_limbs()[1] as u128) << 64);
 
         let mut state = Self::load_state(db)?;
 
@@ -519,7 +507,8 @@ impl StakingPrecompile {
             .ok_or_else(|| PrecompileError::InvalidInput("expected to validator".into()))?;
         let amount_u256 = abi::decode_u256(data, 64)
             .ok_or_else(|| PrecompileError::InvalidInput("expected amount".into()))?;
-        let amount = amount_u256.as_limbs()[0] as u128 | ((amount_u256.as_limbs()[1] as u128) << 64);
+        let amount =
+            amount_u256.as_limbs()[0] as u128 | ((amount_u256.as_limbs()[1] as u128) << 64);
 
         let mut state = Self::load_state(db)?;
 
@@ -797,29 +786,36 @@ impl StakingPrecompile {
 
         // Parse validators array offset and amounts array offset
         if data.len() < 64 {
-            return Err(PrecompileError::InvalidInput("insufficient data for batch delegate".into()));
+            return Err(PrecompileError::InvalidInput(
+                "insufficient data for batch delegate".into(),
+            ));
         }
 
         // Decode arrays (simplified - assumes contiguous encoding)
         let (validators, amounts) = Self::decode_batch_delegate_params(data)?;
 
         if validators.len() != amounts.len() {
-            return Err(PrecompileError::InvalidInput("validators and amounts length mismatch".into()));
+            return Err(PrecompileError::InvalidInput(
+                "validators and amounts length mismatch".into(),
+            ));
         }
 
         if validators.len() > MAX_BATCH_VALIDATORS {
-            return Err(PrecompileError::InvalidInput(
-                format!("too many validators: {} > {}", validators.len(), MAX_BATCH_VALIDATORS)
-            ));
+            return Err(PrecompileError::InvalidInput(format!(
+                "too many validators: {} > {}",
+                validators.len(),
+                MAX_BATCH_VALIDATORS
+            )));
         }
 
         // Verify total amount matches msg.value
         let total_amount: u128 = amounts.iter().sum();
         let msg_value = value.as_limbs()[0] as u128 | ((value.as_limbs()[1] as u128) << 64);
         if total_amount != msg_value {
-            return Err(PrecompileError::InvalidInput(
-                format!("amounts sum ({}) doesn't match msg.value ({})", total_amount, msg_value)
-            ));
+            return Err(PrecompileError::InvalidInput(format!(
+                "amounts sum ({}) doesn't match msg.value ({})",
+                total_amount, msg_value
+            )));
         }
 
         let mut state = Self::load_state(db)?;
@@ -865,8 +861,8 @@ impl StakingPrecompile {
         Self::save_state(db, &state)?;
 
         // Calculate gas: base + per-validator cost
-        let gas_used = GAS_BATCH_DELEGATE_BASE +
-            (validators.len() as u64 * GAS_BATCH_DELEGATE_PER_VALIDATOR);
+        let gas_used =
+            GAS_BATCH_DELEGATE_BASE + (validators.len() as u64 * GAS_BATCH_DELEGATE_PER_VALIDATOR);
 
         debug!(
             caller = %caller,
@@ -904,13 +900,17 @@ impl StakingPrecompile {
         let validators = Self::decode_address_array(data)?;
 
         if validators.is_empty() {
-            return Err(PrecompileError::InvalidInput("no validators provided".into()));
+            return Err(PrecompileError::InvalidInput(
+                "no validators provided".into(),
+            ));
         }
 
         if validators.len() > MAX_BATCH_VALIDATORS {
-            return Err(PrecompileError::InvalidInput(
-                format!("too many validators: {} > {}", validators.len(), MAX_BATCH_VALIDATORS)
-            ));
+            return Err(PrecompileError::InvalidInput(format!(
+                "too many validators: {} > {}",
+                validators.len(),
+                MAX_BATCH_VALIDATORS
+            )));
         }
 
         let total_amount = value.as_limbs()[0] as u128 | ((value.as_limbs()[1] as u128) << 64);
@@ -928,7 +928,13 @@ impl StakingPrecompile {
         let amounts: Vec<u128> = validators
             .iter()
             .enumerate()
-            .map(|(i, _)| if i == 0 { per_validator + remainder } else { per_validator })
+            .map(|(i, _)| {
+                if i == 0 {
+                    per_validator + remainder
+                } else {
+                    per_validator
+                }
+            })
             .collect();
 
         // Encode as batch delegate params and delegate
@@ -964,7 +970,9 @@ impl StakingPrecompile {
 
         // Offset to validators array (3 * 32 + offset)
         output.extend_from_slice(&abi::encode_u256(U256::from(128))); // offset to validators
-        output.extend_from_slice(&abi::encode_u256(U256::from(128 + 32 + summary.validators.len() * 32))); // offset to amounts
+        output.extend_from_slice(&abi::encode_u256(U256::from(
+            128 + 32 + summary.validators.len() * 32,
+        ))); // offset to amounts
 
         // Validators array
         output.extend_from_slice(&abi::encode_u256(U256::from(summary.validators.len())));
@@ -980,7 +988,10 @@ impl StakingPrecompile {
             output.extend_from_slice(&abi::encode_u256(U256::from(*amount)));
         }
 
-        Ok(PrecompileOutput::new(Bytes::from(output), GAS_GET_ALL_DELEGATIONS))
+        Ok(PrecompileOutput::new(
+            Bytes::from(output),
+            GAS_GET_ALL_DELEGATIONS,
+        ))
     }
 
     /// Auto-rebalance stake when validators become inactive
@@ -1000,7 +1011,9 @@ impl StakingPrecompile {
         let target_validators = Self::decode_address_array(data)?;
 
         if target_validators.is_empty() {
-            return Err(PrecompileError::InvalidInput("no target validators provided".into()));
+            return Err(PrecompileError::InvalidInput(
+                "no target validators provided".into(),
+            ));
         }
 
         let mut state = Self::load_state(db)?;
@@ -1026,19 +1039,27 @@ impl StakingPrecompile {
         }
 
         if stake_to_redistribute == 0 {
-            return Err(PrecompileError::InvalidInput("no inactive validators to rebalance from".into()));
+            return Err(PrecompileError::InvalidInput(
+                "no inactive validators to rebalance from".into(),
+            ));
         }
 
         // Filter target validators to only active ones
         let active_targets: Vec<Address> = target_validators
             .into_iter()
             .filter(|v| {
-                state.validators.get(v).map(|val| val.active && !val.jailed).unwrap_or(false)
+                state
+                    .validators
+                    .get(v)
+                    .map(|val| val.active && !val.jailed)
+                    .unwrap_or(false)
             })
             .collect();
 
         if active_targets.is_empty() {
-            return Err(PrecompileError::InvalidInput("no active target validators".into()));
+            return Err(PrecompileError::InvalidInput(
+                "no active target validators".into(),
+            ));
         }
 
         // Remove stake from inactive validators
@@ -1047,7 +1068,12 @@ impl StakingPrecompile {
                 if let Some(val) = state.validators.get_mut(validator) {
                     val.total_stake = val.total_stake.saturating_sub(record.amount);
                 }
-                logs.push(Self::create_undelegated_event(caller, *validator, record.amount, block_number));
+                logs.push(Self::create_undelegated_event(
+                    caller,
+                    *validator,
+                    record.amount,
+                    block_number,
+                ));
             }
         }
 
@@ -1056,7 +1082,11 @@ impl StakingPrecompile {
         let remainder = stake_to_redistribute % active_targets.len() as u128;
 
         for (i, validator) in active_targets.iter().enumerate() {
-            let amount = if i == 0 { per_validator + remainder } else { per_validator };
+            let amount = if i == 0 {
+                per_validator + remainder
+            } else {
+                per_validator
+            };
 
             if let Some(val) = state.validators.get_mut(validator) {
                 val.total_stake += amount;
@@ -1134,8 +1164,8 @@ impl StakingPrecompile {
         state.total_stake += total_amount;
         Self::save_state(db, &state)?;
 
-        let gas_used = GAS_BATCH_DELEGATE_BASE +
-            (validators.len() as u64 * GAS_BATCH_DELEGATE_PER_VALIDATOR);
+        let gas_used =
+            GAS_BATCH_DELEGATE_BASE + (validators.len() as u64 * GAS_BATCH_DELEGATE_PER_VALIDATOR);
 
         let mut output = PrecompileOutput::new(
             Bytes::copy_from_slice(&abi::encode_u256(U256::from(total_amount))),
@@ -1148,10 +1178,14 @@ impl StakingPrecompile {
     }
 
     /// Decode batch delegate parameters (validators[], amounts[])
-    fn decode_batch_delegate_params(data: &[u8]) -> Result<(Vec<Address>, Vec<u128>), PrecompileError> {
+    fn decode_batch_delegate_params(
+        data: &[u8],
+    ) -> Result<(Vec<Address>, Vec<u128>), PrecompileError> {
         // Simplified ABI decoding for two dynamic arrays
         if data.len() < 128 {
-            return Err(PrecompileError::InvalidInput("insufficient data for batch params".into()));
+            return Err(PrecompileError::InvalidInput(
+                "insufficient data for batch params".into(),
+            ));
         }
 
         let validators_offset = abi::decode_u256(data, 0)
@@ -1170,7 +1204,9 @@ impl StakingPrecompile {
     /// Decode address array from data
     fn decode_address_array(data: &[u8]) -> Result<Vec<Address>, PrecompileError> {
         if data.len() < 32 {
-            return Err(PrecompileError::InvalidInput("insufficient data for array".into()));
+            return Err(PrecompileError::InvalidInput(
+                "insufficient data for array".into(),
+            ));
         }
 
         let offset = abi::decode_u256(data, 0)
@@ -1180,9 +1216,14 @@ impl StakingPrecompile {
     }
 
     /// Decode address array at specific offset
-    fn decode_address_array_at(data: &[u8], offset: usize) -> Result<Vec<Address>, PrecompileError> {
+    fn decode_address_array_at(
+        data: &[u8],
+        offset: usize,
+    ) -> Result<Vec<Address>, PrecompileError> {
         if offset + 32 > data.len() {
-            return Err(PrecompileError::InvalidInput("array offset out of bounds".into()));
+            return Err(PrecompileError::InvalidInput(
+                "array offset out of bounds".into(),
+            ));
         }
 
         let length = abi::decode_u256(data, offset)
@@ -1193,12 +1234,16 @@ impl StakingPrecompile {
         for i in 0..length {
             let addr_offset = offset + 32 + i * 32;
             if addr_offset + 32 > data.len() {
-                return Err(PrecompileError::InvalidInput("array element out of bounds".into()));
+                return Err(PrecompileError::InvalidInput(
+                    "array element out of bounds".into(),
+                ));
             }
             if let Some(addr) = abi::decode_address(data, addr_offset) {
                 addresses.push(addr);
             } else {
-                return Err(PrecompileError::InvalidInput("invalid address in array".into()));
+                return Err(PrecompileError::InvalidInput(
+                    "invalid address in array".into(),
+                ));
             }
         }
 
@@ -1208,7 +1253,9 @@ impl StakingPrecompile {
     /// Decode u128 array at specific offset
     fn decode_u128_array_at(data: &[u8], offset: usize) -> Result<Vec<u128>, PrecompileError> {
         if offset + 32 > data.len() {
-            return Err(PrecompileError::InvalidInput("array offset out of bounds".into()));
+            return Err(PrecompileError::InvalidInput(
+                "array offset out of bounds".into(),
+            ));
         }
 
         let length = abi::decode_u256(data, offset)
@@ -1219,7 +1266,9 @@ impl StakingPrecompile {
         for i in 0..length {
             let val_offset = offset + 32 + i * 32;
             if val_offset + 32 > data.len() {
-                return Err(PrecompileError::InvalidInput("array element out of bounds".into()));
+                return Err(PrecompileError::InvalidInput(
+                    "array element out of bounds".into(),
+                ));
             }
             let val = abi::decode_u256(data, val_offset)
                 .ok_or_else(|| PrecompileError::InvalidInput("invalid value in array".into()))?;
@@ -1233,27 +1282,111 @@ impl StakingPrecompile {
 
     // State management helpers
 
-    /// Load staking state from storage
-    fn load_state<DB: Database>(
-        _db: &StateAdapter<DB>,
+    /// Get staking state for external access (e.g., governance voting power)
+    ///
+    /// This is the public accessor for other precompiles to read staking state.
+    pub fn get_staking_state<DB: Database>(
+        db: &mut StateAdapter<DB>,
     ) -> Result<StakingState, PrecompileError>
     where
         DB::Error: std::fmt::Debug,
     {
-        // In a real implementation, this would read from the state trie
-        // For now, return a default state
-        Ok(StakingState::default())
+        Self::load_state(db)
+    }
+
+    /// Storage slot for state length (in bytes)
+    const STATE_LENGTH_SLOT: U256 = U256::ZERO;
+
+    /// Base slot for state data (chunked in 32-byte slots)
+    const STATE_DATA_BASE_SLOT: u64 = 1;
+
+    /// Load staking state from storage
+    ///
+    /// State is stored as JSON, chunked across multiple 32-byte storage slots:
+    /// - Slot 0: Length of serialized state in bytes
+    /// - Slots 1..n: 32-byte chunks of serialized JSON
+    fn load_state<DB: Database>(db: &mut StateAdapter<DB>) -> Result<StakingState, PrecompileError>
+    where
+        DB::Error: std::fmt::Debug,
+    {
+        // Read state length from slot 0
+        let length_slot = db
+            .get_storage(STAKING_ADDRESS, Self::STATE_LENGTH_SLOT)
+            .map_err(|e| PrecompileError::StateError(format!("{:?}", e)))?;
+
+        let length: usize = length_slot.try_into().unwrap_or(0);
+
+        // If no state stored, return default
+        if length == 0 {
+            return Ok(StakingState::default());
+        }
+
+        // Calculate number of slots needed
+        let num_slots = (length + 31) / 32;
+
+        // Read state data from consecutive slots
+        let mut data = Vec::with_capacity(length);
+        for i in 0..num_slots {
+            let slot = U256::from(Self::STATE_DATA_BASE_SLOT + i as u64);
+            let value = db
+                .get_storage(STAKING_ADDRESS, slot)
+                .map_err(|e| PrecompileError::StateError(format!("{:?}", e)))?;
+
+            // Convert U256 to bytes (big-endian)
+            let bytes: [u8; 32] = value.to_be_bytes();
+            data.extend_from_slice(&bytes);
+        }
+
+        // Truncate to actual length
+        data.truncate(length);
+
+        // Deserialize from JSON
+        serde_json::from_slice(&data)
+            .map_err(|e| PrecompileError::StateError(format!("deserialize error: {}", e)))
     }
 
     /// Save staking state to storage
+    ///
+    /// State is stored as JSON, chunked across multiple 32-byte storage slots:
+    /// - Slot 0: Length of serialized state in bytes
+    /// - Slots 1..n: 32-byte chunks of serialized JSON
     fn save_state<DB: Database>(
-        _db: &mut StateAdapter<DB>,
-        _state: &StakingState,
+        db: &mut StateAdapter<DB>,
+        state: &StakingState,
     ) -> Result<(), PrecompileError>
     where
         DB::Error: std::fmt::Debug,
     {
-        // In a real implementation, this would write to the state trie
+        // Serialize state to JSON
+        let data = serde_json::to_vec(state)
+            .map_err(|e| PrecompileError::StateError(format!("serialize error: {}", e)))?;
+
+        let length = data.len();
+
+        // Store length in slot 0
+        db.set_storage(STAKING_ADDRESS, Self::STATE_LENGTH_SLOT, U256::from(length));
+
+        // Store data in consecutive 32-byte slots
+        let num_slots = (length + 31) / 32;
+        for i in 0..num_slots {
+            let slot = U256::from(Self::STATE_DATA_BASE_SLOT + i as u64);
+            let start = i * 32;
+            let end = (start + 32).min(length);
+
+            // Pad to 32 bytes if needed
+            let mut chunk = [0u8; 32];
+            chunk[..end - start].copy_from_slice(&data[start..end]);
+
+            let value = U256::from_be_bytes(chunk);
+            db.set_storage(STAKING_ADDRESS, slot, value);
+        }
+
+        debug!(
+            length = length,
+            slots = num_slots,
+            "Saved staking state to storage"
+        );
+
         Ok(())
     }
 
@@ -1272,10 +1405,7 @@ impl StakingPrecompile {
         let mut topic1 = [0u8; 32];
         topic1[12..32].copy_from_slice(validator.as_slice());
 
-        let topics = vec![
-            B256::from(event_sig),
-            B256::from(topic1),
-        ];
+        let topics = vec![B256::from(event_sig), B256::from(topic1)];
 
         // Encode data: pubkey offset, stake, commission, pubkey length, pubkey data
         let mut data = Vec::new();
@@ -1288,11 +1418,7 @@ impl StakingPrecompile {
         pubkey_padded[..copy_len].copy_from_slice(&pubkey[..copy_len]);
         data.extend_from_slice(&pubkey_padded);
 
-        revm::primitives::Log::new_unchecked(
-            STAKING_ADDRESS,
-            topics,
-            Bytes::from(data),
-        )
+        revm::primitives::Log::new_unchecked(STAKING_ADDRESS, topics, Bytes::from(data))
     }
 
     /// Create Delegated event log
@@ -1317,11 +1443,7 @@ impl StakingPrecompile {
 
         let data = abi::encode_u256(U256::from(amount));
 
-        revm::primitives::Log::new_unchecked(
-            STAKING_ADDRESS,
-            topics,
-            Bytes::copy_from_slice(&data),
-        )
+        revm::primitives::Log::new_unchecked(STAKING_ADDRESS, topics, Bytes::copy_from_slice(&data))
     }
 
     /// Create Undelegated event log
@@ -1349,11 +1471,7 @@ impl StakingPrecompile {
         data.extend_from_slice(&abi::encode_u256(U256::from(amount)));
         data.extend_from_slice(&abi::encode_u256(U256::from(unlock_height)));
 
-        revm::primitives::Log::new_unchecked(
-            STAKING_ADDRESS,
-            topics,
-            Bytes::from(data),
-        )
+        revm::primitives::Log::new_unchecked(STAKING_ADDRESS, topics, Bytes::from(data))
     }
 
     /// Create RewardsClaimed event log
@@ -1363,18 +1481,11 @@ impl StakingPrecompile {
         let mut topic1 = [0u8; 32];
         topic1[12..32].copy_from_slice(delegator.as_slice());
 
-        let topics = vec![
-            B256::from(event_sig),
-            B256::from(topic1),
-        ];
+        let topics = vec![B256::from(event_sig), B256::from(topic1)];
 
         let data = abi::encode_u256(U256::from(amount));
 
-        revm::primitives::Log::new_unchecked(
-            STAKING_ADDRESS,
-            topics,
-            Bytes::copy_from_slice(&data),
-        )
+        revm::primitives::Log::new_unchecked(STAKING_ADDRESS, topics, Bytes::copy_from_slice(&data))
     }
 }
 

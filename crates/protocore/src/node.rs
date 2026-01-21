@@ -12,9 +12,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use libp2p::{Multiaddr, PeerId, multiaddr::Protocol};
+use libp2p::{multiaddr::Protocol, Multiaddr, PeerId};
 use parking_lot::RwLock;
-use serde_json;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,9 +21,11 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
+use alloy_primitives::{Address as AlloyAddress, Bytes, B256, U256};
 use protocore_config::Config;
 use protocore_consensus::{BlockBuilder, BlockValidator, ConsensusEngine};
 use protocore_crypto::Hash as CryptoHash;
+use protocore_evm::{BlockContext, EvmConfig, EvmExecutor, MemoryDb, TransactionData};
 use protocore_mempool::{AccountStateProvider, Mempool, MempoolConfig, ValidationConfig};
 use protocore_p2p::{GossipMessage, NetworkConfig, NetworkEvent, NetworkHandle, NetworkService};
 use protocore_rpc::{
@@ -35,6 +36,7 @@ use protocore_rpc::{
 };
 use protocore_storage::{Database, DatabaseConfig, StateDB};
 use protocore_types::{Address, Block, BlockHeader, H256};
+use revm::primitives::AccountInfo;
 
 /// Adapter to provide account state from StateDB to the Mempool
 /// This implements the AccountStateProvider trait required by Mempool
@@ -80,7 +82,12 @@ impl RpcStateAdapter {
         mempool: Arc<Mempool<StateDBAdapter>>,
         chain_id: u64,
     ) -> Self {
-        Self { database, state_db, mempool, chain_id }
+        Self {
+            database,
+            state_db,
+            mempool,
+            chain_id,
+        }
     }
 
     /// Get block number from tag
@@ -151,15 +158,22 @@ impl RpcStateAdapter {
         // Convert transactions to hashes or full objects
         let transactions = if full {
             Transactions::Full(
-                block.transactions.iter().enumerate().map(|(idx, tx)| {
-                    self.tx_to_rpc(tx, Some(&block_hash), Some(header.height), Some(idx as u64))
-                }).collect()
+                block
+                    .transactions
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, tx)| {
+                        self.tx_to_rpc(tx, Some(&block_hash), Some(header.height), Some(idx as u64))
+                    })
+                    .collect(),
             )
         } else {
             Transactions::Hashes(
-                block.transactions.iter().map(|tx| {
-                    protocore_rpc::H256(tx.hash().into())
-                }).collect()
+                block
+                    .transactions
+                    .iter()
+                    .map(|tx| protocore_rpc::H256(tx.hash().into()))
+                    .collect(),
             )
         };
 
@@ -170,9 +184,9 @@ impl RpcStateAdapter {
             number: HexU64(header.height),
             hash: protocore_rpc::H256(*block_hash.as_fixed_bytes()),
             parent_hash: protocore_rpc::H256(*header.parent_hash.as_fixed_bytes()),
-            nonce: HexU64(0), // PoS, no nonce
+            nonce: HexU64(0),                            // PoS, no nonce
             sha3_uncles: protocore_rpc::H256([0u8; 32]), // No uncles
-            logs_bloom: HexBytes(vec![0u8; 256]), // Empty bloom
+            logs_bloom: HexBytes(vec![0u8; 256]),        // Empty bloom
             transactions_root: protocore_rpc::H256(*header.transactions_root.as_fixed_bytes()),
             state_root: protocore_rpc::H256(*header.state_root.as_fixed_bytes()),
             receipts_root: protocore_rpc::H256(*header.receipts_root.as_fixed_bytes()),
@@ -193,7 +207,13 @@ impl RpcStateAdapter {
     }
 
     /// Convert a SignedTransaction to RpcTransaction format
-    fn tx_to_rpc(&self, tx: &protocore_types::SignedTransaction, block_hash: Option<&protocore_types::H256>, block_number: Option<u64>, tx_index: Option<u64>) -> RpcTransaction {
+    fn tx_to_rpc(
+        &self,
+        tx: &protocore_types::SignedTransaction,
+        block_hash: Option<&protocore_types::H256>,
+        block_number: Option<u64>,
+        tx_index: Option<u64>,
+    ) -> RpcTransaction {
         use protocore_rpc::HexBytes;
 
         let inner_tx = &tx.transaction;
@@ -240,15 +260,27 @@ impl StateProvider for RpcStateAdapter {
         Ok(self.get_latest_height())
     }
 
-    async fn get_balance(&self, address: &protocore_rpc::Address, _block: &BlockNumberOrTag) -> Result<u128, RpcError> {
+    async fn get_balance(
+        &self,
+        address: &protocore_rpc::Address,
+        _block: &BlockNumberOrTag,
+    ) -> Result<u128, RpcError> {
         Ok(self.state_db.get_balance(&address.0))
     }
 
-    async fn get_transaction_count(&self, address: &protocore_rpc::Address, _block: &BlockNumberOrTag) -> Result<u64, RpcError> {
+    async fn get_transaction_count(
+        &self,
+        address: &protocore_rpc::Address,
+        _block: &BlockNumberOrTag,
+    ) -> Result<u64, RpcError> {
         Ok(self.state_db.get_nonce(&address.0))
     }
 
-    async fn get_block_by_number(&self, block_tag: &BlockNumberOrTag, full: bool) -> Result<Option<RpcBlock>, RpcError> {
+    async fn get_block_by_number(
+        &self,
+        block_tag: &BlockNumberOrTag,
+        full: bool,
+    ) -> Result<Option<RpcBlock>, RpcError> {
         let height = self.resolve_block_number(block_tag)?;
         debug!(height = height, "get_block_by_number called");
 
@@ -258,7 +290,11 @@ impl StateProvider for RpcStateAdapter {
         }
     }
 
-    async fn get_block_by_hash(&self, hash: &protocore_rpc::H256, full: bool) -> Result<Option<RpcBlock>, RpcError> {
+    async fn get_block_by_hash(
+        &self,
+        hash: &protocore_rpc::H256,
+        full: bool,
+    ) -> Result<Option<RpcBlock>, RpcError> {
         debug!(hash = %hex::encode(&hash.0[..8]), "get_block_by_hash called");
 
         match self.get_block_by_hash_internal(&hash.0) {
@@ -267,36 +303,441 @@ impl StateProvider for RpcStateAdapter {
         }
     }
 
-    async fn get_transaction(&self, _hash: &protocore_rpc::H256) -> Result<Option<RpcTransaction>, RpcError> {
-        // In production, would fetch transaction from database
-        Ok(None)
+    async fn get_transaction(
+        &self,
+        hash: &protocore_rpc::H256,
+    ) -> Result<Option<RpcTransaction>, RpcError> {
+        // Fetch transaction location from database
+        let tx_location = match self.database.get_transaction(&hash.0) {
+            Ok(Some(data)) if data.len() >= 48 => data,
+            Ok(_) => return Ok(None),
+            Err(e) => return Err(RpcError::Internal(format!("Database error: {}", e))),
+        };
+
+        // Parse location: block_hash(32) + block_height(8) + tx_index(8)
+        let mut block_hash = [0u8; 32];
+        block_hash.copy_from_slice(&tx_location[0..32]);
+        let block_height = u64::from_le_bytes(tx_location[32..40].try_into().unwrap());
+        let tx_index = u64::from_le_bytes(tx_location[40..48].try_into().unwrap());
+
+        // Get the block to retrieve the full transaction
+        let block = match self.get_block_by_hash_internal(&block_hash) {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+
+        // Get the transaction from the block
+        let signed_tx = match block.transactions.get(tx_index as usize) {
+            Some(tx) => tx,
+            None => return Ok(None),
+        };
+
+        Ok(Some(self.tx_to_rpc(
+            signed_tx,
+            Some(&protocore_types::H256::from(block_hash)),
+            Some(block_height),
+            Some(tx_index),
+        )))
     }
 
-    async fn get_receipt(&self, _hash: &protocore_rpc::H256) -> Result<Option<RpcReceipt>, RpcError> {
-        // In production, would fetch receipt from database
-        Ok(None)
+    async fn get_receipt(
+        &self,
+        hash: &protocore_rpc::H256,
+    ) -> Result<Option<RpcReceipt>, RpcError> {
+        use protocore_rpc::{HexBytes, HexU256, HexU64};
+
+        // Fetch receipt from database
+        let receipt_data = match self.database.get_receipt(&hash.0) {
+            Ok(Some(data)) if data.len() >= 89 => data,
+            Ok(_) => return Ok(None),
+            Err(e) => return Err(RpcError::Internal(format!("Database error: {}", e))),
+        };
+
+        // Parse receipt data: tx_hash(32) + block_hash(32) + block_height(8) + tx_index(8) + status(1) + gas_used(8)
+        let mut tx_hash = [0u8; 32];
+        tx_hash.copy_from_slice(&receipt_data[0..32]);
+        let mut block_hash = [0u8; 32];
+        block_hash.copy_from_slice(&receipt_data[32..64]);
+        let block_height = u64::from_le_bytes(receipt_data[64..72].try_into().unwrap());
+        let tx_index = u64::from_le_bytes(receipt_data[72..80].try_into().unwrap());
+        let status = receipt_data[80];
+        let gas_used = u64::from_le_bytes(receipt_data[81..89].try_into().unwrap());
+
+        // Get the block to retrieve additional info
+        let block = self.get_block_by_hash_internal(&block_hash);
+
+        // Reconstruct sender from the transaction (if block exists)
+        let from = if let Some(ref blk) = block {
+            if let Some(tx) = blk.transactions.get(tx_index as usize) {
+                protocore_rpc::Address(tx.sender().unwrap_or_default().into())
+            } else {
+                protocore_rpc::Address::ZERO
+            }
+        } else {
+            protocore_rpc::Address::ZERO
+        };
+
+        // Get recipient address
+        let to = if let Some(ref blk) = block {
+            if let Some(tx) = blk.transactions.get(tx_index as usize) {
+                tx.transaction
+                    .to
+                    .map(|addr| protocore_rpc::Address(addr.into()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Calculate cumulative gas (simplified - just use gas_used for now)
+        let cumulative_gas_used = gas_used;
+
+        Ok(Some(RpcReceipt {
+            transaction_hash: protocore_rpc::H256(tx_hash),
+            transaction_index: HexU64(tx_index),
+            block_hash: protocore_rpc::H256(block_hash),
+            block_number: HexU64(block_height),
+            from,
+            to,
+            cumulative_gas_used: HexU64(cumulative_gas_used),
+            gas_used: HexU64(gas_used),
+            contract_address: None, // TODO: Set if contract creation
+            logs: vec![],           // TODO: Populate from EVM execution
+            logs_bloom: HexBytes(vec![0u8; 256]),
+            status: HexU64(status as u64),
+            effective_gas_price: HexU64(1_000_000_000), // 1 gwei placeholder
+            tx_type: HexU64(2),                         // EIP-1559
+        }))
     }
 
-    async fn get_code(&self, address: &protocore_rpc::Address, _block: &BlockNumberOrTag) -> Result<Vec<u8>, RpcError> {
+    async fn get_code(
+        &self,
+        address: &protocore_rpc::Address,
+        _block: &BlockNumberOrTag,
+    ) -> Result<Vec<u8>, RpcError> {
         // get_code takes a code_hash, not an address
         // For now, return empty code
         let _ = address;
         Ok(vec![])
     }
 
-    async fn get_storage(&self, address: &protocore_rpc::Address, position: &protocore_rpc::H256, _block: &BlockNumberOrTag) -> Result<protocore_rpc::H256, RpcError> {
+    async fn get_storage(
+        &self,
+        address: &protocore_rpc::Address,
+        position: &protocore_rpc::H256,
+        _block: &BlockNumberOrTag,
+    ) -> Result<protocore_rpc::H256, RpcError> {
         let value = self.state_db.get_storage(&address.0, &position.0);
         Ok(protocore_rpc::H256(value))
     }
 
-    async fn call(&self, _tx: &CallRequest, _block: &BlockNumberOrTag) -> Result<Vec<u8>, RpcError> {
-        // In production, would execute call via EVM
-        Err(RpcError::Internal("Call execution not implemented".to_string()))
+    async fn call(&self, tx: &CallRequest, block: &BlockNumberOrTag) -> Result<Vec<u8>, RpcError> {
+        // Get block height for context
+        let height = self.resolve_block_number(block)?;
+
+        // Create a MemoryDb and populate with relevant account state
+        let mut memory_db = MemoryDb::new();
+
+        // Get sender address (default to zero address if not specified)
+        let from = tx
+            .from
+            .map(|a| AlloyAddress::from_slice(&a.0))
+            .unwrap_or(AlloyAddress::ZERO);
+
+        // Get recipient address
+        let to = tx.to.map(|a| AlloyAddress::from_slice(&a.0));
+
+        // Load sender account state into memory db
+        let from_bytes: [u8; 20] = from.0.into();
+        let sender_balance = self.state_db.get_balance(&from_bytes);
+        let sender_nonce = self.state_db.get_nonce(&from_bytes);
+        memory_db.insert_account(
+            from,
+            AccountInfo {
+                balance: U256::from(sender_balance),
+                nonce: sender_nonce,
+                ..Default::default()
+            },
+        );
+
+        // Load recipient account state if it exists
+        if let Some(to_addr) = to {
+            let to_bytes: [u8; 20] = to_addr.0.into();
+            let to_balance = self.state_db.get_balance(&to_bytes);
+            let to_nonce = self.state_db.get_nonce(&to_bytes);
+
+            // Get contract code if it exists
+            if let Some(account) = self.state_db.get_account(&to_bytes) {
+                if let Some(code) = self.state_db.get_code(&account.code_hash) {
+                    if !code.is_empty() {
+                        let bytecode = revm::primitives::Bytecode::new_raw(Bytes::from(code));
+                        let code_hash = memory_db.insert_code(bytecode);
+                        memory_db.insert_account(
+                            to_addr,
+                            AccountInfo {
+                                balance: U256::from(to_balance),
+                                nonce: to_nonce,
+                                code_hash,
+                                ..Default::default()
+                            },
+                        );
+                    } else {
+                        memory_db.insert_account(
+                            to_addr,
+                            AccountInfo {
+                                balance: U256::from(to_balance),
+                                nonce: to_nonce,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                } else {
+                    memory_db.insert_account(
+                        to_addr,
+                        AccountInfo {
+                            balance: U256::from(to_balance),
+                            nonce: to_nonce,
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+
+        // Create EVM config
+        let evm_config = EvmConfig {
+            chain_id: self.chain_id,
+            ..EvmConfig::default()
+        };
+
+        // Create executor
+        let mut executor = EvmExecutor::new(memory_db, evm_config);
+
+        // Build transaction data
+        let input_data = tx
+            .get_input()
+            .map(|h| Bytes::from(h.0.clone()))
+            .unwrap_or_default();
+
+        let value = tx
+            .value
+            .as_ref()
+            .map(|v| {
+                let mut bytes = [0u8; 32];
+                bytes.copy_from_slice(&v.0);
+                U256::from_be_bytes(bytes)
+            })
+            .unwrap_or(U256::ZERO);
+
+        let gas_limit = tx.gas.map(|g| g.0).unwrap_or(30_000_000);
+        let max_fee_per_gas = tx
+            .max_fee_per_gas
+            .map(|g| g.0 as u128)
+            .or(tx.gas_price.map(|g| g.0 as u128))
+            .unwrap_or(1_000_000_000);
+        let max_priority_fee = tx
+            .max_priority_fee_per_gas
+            .map(|g| g.0 as u128)
+            .unwrap_or(0);
+        let nonce = tx.nonce.map(|n| n.0).unwrap_or(sender_nonce);
+
+        let tx_data = TransactionData {
+            hash: B256::ZERO, // Not needed for call
+            from,
+            to,
+            value,
+            data: input_data,
+            gas_limit,
+            max_fee_per_gas,
+            max_priority_fee_per_gas: max_priority_fee,
+            nonce,
+            access_list: vec![],
+        };
+
+        // Create block context
+        let block_context = BlockContext {
+            number: height,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            gas_limit: 30_000_000,
+            coinbase: AlloyAddress::ZERO,
+            base_fee: 1_000_000_000, // 1 gwei
+            prev_randao: B256::ZERO,
+        };
+
+        // Execute the call
+        match executor.call(&tx_data, &block_context) {
+            Ok(result) => {
+                if result.success {
+                    Ok(result.output.map(|b| b.to_vec()).unwrap_or_default())
+                } else {
+                    // Return revert data if available
+                    let revert_data = result.output.map(|b| b.to_vec()).unwrap_or_default();
+                    if revert_data.is_empty() {
+                        Err(RpcError::ExecutionError("Execution reverted".to_string()))
+                    } else {
+                        Err(RpcError::ExecutionError(format!(
+                            "Execution reverted: 0x{}",
+                            hex::encode(&revert_data)
+                        )))
+                    }
+                }
+            }
+            Err(e) => Err(RpcError::Internal(format!("EVM execution error: {:?}", e))),
+        }
     }
 
-    async fn estimate_gas(&self, _tx: &CallRequest, _block: &BlockNumberOrTag) -> Result<u64, RpcError> {
-        // Default gas estimate
-        Ok(21000)
+    async fn estimate_gas(
+        &self,
+        tx: &CallRequest,
+        block: &BlockNumberOrTag,
+    ) -> Result<u64, RpcError> {
+        // Get block height for context
+        let height = self.resolve_block_number(block)?;
+
+        // Create a MemoryDb and populate with relevant account state
+        let mut memory_db = MemoryDb::new();
+
+        // Get sender address (default to zero address if not specified)
+        let from = tx
+            .from
+            .map(|a| AlloyAddress::from_slice(&a.0))
+            .unwrap_or(AlloyAddress::ZERO);
+
+        // Get recipient address
+        let to = tx.to.map(|a| AlloyAddress::from_slice(&a.0));
+
+        // Load sender account state into memory db
+        let from_bytes: [u8; 20] = from.0.into();
+        let sender_balance = self.state_db.get_balance(&from_bytes);
+        let sender_nonce = self.state_db.get_nonce(&from_bytes);
+        memory_db.insert_account(
+            from,
+            AccountInfo {
+                balance: U256::from(sender_balance),
+                nonce: sender_nonce,
+                ..Default::default()
+            },
+        );
+
+        // Load recipient account state if it exists
+        if let Some(to_addr) = to {
+            let to_bytes: [u8; 20] = to_addr.0.into();
+            let to_balance = self.state_db.get_balance(&to_bytes);
+            let to_nonce = self.state_db.get_nonce(&to_bytes);
+
+            // Get contract code if it exists
+            if let Some(account) = self.state_db.get_account(&to_bytes) {
+                if let Some(code) = self.state_db.get_code(&account.code_hash) {
+                    if !code.is_empty() {
+                        let bytecode = revm::primitives::Bytecode::new_raw(Bytes::from(code));
+                        let code_hash = memory_db.insert_code(bytecode);
+                        memory_db.insert_account(
+                            to_addr,
+                            AccountInfo {
+                                balance: U256::from(to_balance),
+                                nonce: to_nonce,
+                                code_hash,
+                                ..Default::default()
+                            },
+                        );
+                    } else {
+                        memory_db.insert_account(
+                            to_addr,
+                            AccountInfo {
+                                balance: U256::from(to_balance),
+                                nonce: to_nonce,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                } else {
+                    memory_db.insert_account(
+                        to_addr,
+                        AccountInfo {
+                            balance: U256::from(to_balance),
+                            nonce: to_nonce,
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+
+        // Create EVM config
+        let evm_config = EvmConfig {
+            chain_id: self.chain_id,
+            ..EvmConfig::default()
+        };
+
+        // Create executor
+        let mut executor = EvmExecutor::new(memory_db, evm_config);
+
+        // Build transaction data
+        let input_data = tx
+            .get_input()
+            .map(|h| Bytes::from(h.0.clone()))
+            .unwrap_or_default();
+
+        let value = tx
+            .value
+            .as_ref()
+            .map(|v| {
+                let mut bytes = [0u8; 32];
+                bytes.copy_from_slice(&v.0);
+                U256::from_be_bytes(bytes)
+            })
+            .unwrap_or(U256::ZERO);
+
+        let gas_limit = tx.gas.map(|g| g.0).unwrap_or(30_000_000);
+        let max_fee_per_gas = tx
+            .max_fee_per_gas
+            .map(|g| g.0 as u128)
+            .or(tx.gas_price.map(|g| g.0 as u128))
+            .unwrap_or(1_000_000_000);
+        let max_priority_fee = tx
+            .max_priority_fee_per_gas
+            .map(|g| g.0 as u128)
+            .unwrap_or(0);
+        let nonce = tx.nonce.map(|n| n.0).unwrap_or(sender_nonce);
+
+        let tx_data = TransactionData {
+            hash: B256::ZERO,
+            from,
+            to,
+            value,
+            data: input_data,
+            gas_limit,
+            max_fee_per_gas,
+            max_priority_fee_per_gas: max_priority_fee,
+            nonce,
+            access_list: vec![],
+        };
+
+        // Create block context
+        let block_context = BlockContext {
+            number: height,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            gas_limit: 30_000_000,
+            coinbase: AlloyAddress::ZERO,
+            base_fee: 1_000_000_000,
+            prev_randao: B256::ZERO,
+        };
+
+        // Estimate gas using binary search in the executor
+        match executor.estimate_gas(&tx_data, &block_context) {
+            Ok(gas) => Ok(gas),
+            Err(e) => Err(RpcError::Internal(format!(
+                "Gas estimation failed: {:?}",
+                e
+            ))),
+        }
     }
 
     async fn gas_price(&self) -> Result<u64, RpcError> {
@@ -346,7 +787,9 @@ impl StateProvider for RpcStateAdapter {
         }
 
         // Add to mempool (validates signature, nonce, balance, etc.)
-        let hash = self.mempool.add_transaction(tx)
+        let hash = self
+            .mempool
+            .add_transaction(tx)
             .map_err(|e| RpcError::TransactionRejected(format!("{}", e)))?;
 
         info!(
@@ -357,7 +800,10 @@ impl StateProvider for RpcStateAdapter {
         Ok(protocore_rpc::H256(*hash.as_fixed_bytes()))
     }
 
-    async fn get_block_transaction_count(&self, block: &BlockNumberOrTag) -> Result<Option<u64>, RpcError> {
+    async fn get_block_transaction_count(
+        &self,
+        block: &BlockNumberOrTag,
+    ) -> Result<Option<u64>, RpcError> {
         let height = self.resolve_block_number(block)?;
 
         match self.get_block_by_height_internal(height) {
@@ -366,14 +812,21 @@ impl StateProvider for RpcStateAdapter {
         }
     }
 
-    async fn get_block_transaction_count_by_hash(&self, hash: &protocore_rpc::H256) -> Result<Option<u64>, RpcError> {
+    async fn get_block_transaction_count_by_hash(
+        &self,
+        hash: &protocore_rpc::H256,
+    ) -> Result<Option<u64>, RpcError> {
         match self.get_block_by_hash_internal(&hash.0) {
             Some(block) => Ok(Some(block.transactions.len() as u64)),
             None => Ok(None),
         }
     }
 
-    async fn get_transaction_by_index(&self, block: &BlockNumberOrTag, index: u64) -> Result<Option<RpcTransaction>, RpcError> {
+    async fn get_transaction_by_index(
+        &self,
+        block: &BlockNumberOrTag,
+        index: u64,
+    ) -> Result<Option<RpcTransaction>, RpcError> {
         let height = self.resolve_block_number(block)?;
 
         let block = match self.get_block_by_height_internal(height) {
@@ -387,10 +840,19 @@ impl StateProvider for RpcStateAdapter {
         };
 
         let block_hash = block.hash();
-        Ok(Some(self.tx_to_rpc(tx, Some(&block_hash), Some(height), Some(index))))
+        Ok(Some(self.tx_to_rpc(
+            tx,
+            Some(&block_hash),
+            Some(height),
+            Some(index),
+        )))
     }
 
-    async fn get_transaction_by_hash_and_index(&self, hash: &protocore_rpc::H256, index: u64) -> Result<Option<RpcTransaction>, RpcError> {
+    async fn get_transaction_by_hash_and_index(
+        &self,
+        hash: &protocore_rpc::H256,
+        index: u64,
+    ) -> Result<Option<RpcTransaction>, RpcError> {
         let block = match self.get_block_by_hash_internal(&hash.0) {
             Some(b) => b,
             None => return Ok(None),
@@ -403,7 +865,12 @@ impl StateProvider for RpcStateAdapter {
 
         let block_number = block.header.height;
         let block_hash = protocore_types::H256::from(hash.0);
-        Ok(Some(self.tx_to_rpc(tx, Some(&block_hash), Some(block_number), Some(index))))
+        Ok(Some(self.tx_to_rpc(
+            tx,
+            Some(&block_hash),
+            Some(block_number),
+            Some(index),
+        )))
     }
 }
 
@@ -417,7 +884,11 @@ pub struct RpcProtocoreAdapter {
 impl RpcProtocoreAdapter {
     /// Create a new RpcProtocoreAdapter
     pub fn new(database: Arc<Database>, state_db: Arc<StateDB>, config: Arc<Config>) -> Self {
-        Self { database, state_db, config }
+        Self {
+            database,
+            state_db,
+            config,
+        }
     }
 
     fn get_latest_height(&self) -> u64 {
@@ -443,13 +914,19 @@ impl ProtocoreStateProvider for RpcProtocoreAdapter {
         Ok(vec![])
     }
 
-    async fn get_validator(&self, _address: &protocore_rpc::Address) -> Result<Option<ValidatorInfo>, RpcError> {
+    async fn get_validator(
+        &self,
+        _address: &protocore_rpc::Address,
+    ) -> Result<Option<ValidatorInfo>, RpcError> {
         Ok(None)
     }
 
-    async fn get_staking_info(&self, address: &protocore_rpc::Address) -> Result<StakingInfo, RpcError> {
+    async fn get_staking_info(
+        &self,
+        address: &protocore_rpc::Address,
+    ) -> Result<StakingInfo, RpcError> {
         Ok(StakingInfo {
-            address: address.clone(),
+            address: *address,
             is_validator: false,
             validator: None,
             delegations: vec![],
@@ -463,7 +940,10 @@ impl ProtocoreStateProvider for RpcProtocoreAdapter {
         Ok(None)
     }
 
-    async fn get_proposals(&self, _status: Option<ProposalStatus>) -> Result<Vec<GovernanceProposal>, RpcError> {
+    async fn get_proposals(
+        &self,
+        _status: Option<ProposalStatus>,
+    ) -> Result<Vec<GovernanceProposal>, RpcError> {
         Ok(vec![])
     }
 
@@ -488,7 +968,10 @@ impl ProtocoreStateProvider for RpcProtocoreAdapter {
         })
     }
 
-    async fn get_finality_cert(&self, _block: &BlockNumberOrTag) -> Result<Option<FinalityCert>, RpcError> {
+    async fn get_finality_cert(
+        &self,
+        _block: &BlockNumberOrTag,
+    ) -> Result<Option<FinalityCert>, RpcError> {
         Ok(None)
     }
 
@@ -503,16 +986,26 @@ impl ProtocoreStateProvider for RpcProtocoreAdapter {
         Ok(latest.saturating_sub(1))
     }
 
-    async fn generate_stealth_address(&self, _meta_address: &[u8]) -> Result<StealthAddressResult, RpcError> {
-        Err(RpcError::Internal("Stealth addresses not enabled".to_string()))
+    async fn generate_stealth_address(
+        &self,
+        _meta_address: &[u8],
+    ) -> Result<StealthAddressResult, RpcError> {
+        Err(RpcError::Internal(
+            "Stealth addresses not enabled".to_string(),
+        ))
     }
 
-    async fn get_pending_rewards(&self, _address: &protocore_rpc::Address) -> Result<u128, RpcError> {
+    async fn get_pending_rewards(
+        &self,
+        _address: &protocore_rpc::Address,
+    ) -> Result<u128, RpcError> {
         Ok(0)
     }
 
     async fn get_min_validator_stake(&self) -> Result<u128, RpcError> {
-        self.config.staking.min_validator_stake
+        self.config
+            .staking
+            .min_validator_stake
             .parse()
             .map_err(|_| RpcError::Internal("Invalid min stake config".to_string()))
     }
@@ -568,6 +1061,7 @@ pub enum NodeEvent {
 }
 
 /// Component handles for graceful shutdown
+#[derive(Default)]
 struct ComponentHandles {
     /// Network service handle
     network: Option<JoinHandle<()>>,
@@ -579,18 +1073,6 @@ struct ComponentHandles {
     state_sync: Option<JoinHandle<()>>,
     /// Block executor handle
     executor: Option<JoinHandle<()>>,
-}
-
-impl Default for ComponentHandles {
-    fn default() -> Self {
-        Self {
-            network: None,
-            rpc: None,
-            mempool: None,
-            state_sync: None,
-            executor: None,
-        }
-    }
 }
 
 /// Full node implementation
@@ -646,12 +1128,20 @@ pub struct NodeBlockValidator {
 impl NodeBlockValidator {
     /// Create a new block validator
     pub fn new(state_db: Arc<StateDB>, database: Arc<Database>, chain_id: u64) -> Self {
-        Self { state_db, database, chain_id }
+        Self {
+            state_db,
+            database,
+            chain_id,
+        }
     }
 
     /// Get parent header from database
-    fn get_parent_header(&self, parent_hash: &[u8; 32]) -> std::result::Result<BlockHeader, String> {
-        let block_bytes = self.database
+    fn get_parent_header(
+        &self,
+        parent_hash: &[u8; 32],
+    ) -> std::result::Result<BlockHeader, String> {
+        let block_bytes = self
+            .database
             .get_block(parent_hash)
             .map_err(|e| format!("Database error: {}", e))?
             .ok_or_else(|| "Parent block not found".to_string())?;
@@ -722,14 +1212,17 @@ impl BlockValidator for NodeBlockValidator {
         }
 
         // 7. Basic header validation
-        block.header.validate_basic()
+        block
+            .header
+            .validate_basic()
             .map_err(|e| format!("Header validation failed: {}", e))?;
 
         // 8. Transaction validation
         let mut total_gas = 0u64;
         for (i, tx) in block.transactions.iter().enumerate() {
             // Validate transaction signature
-            let sender = tx.sender()
+            let sender = tx
+                .sender()
                 .map_err(|e| format!("Transaction {} signature invalid: {}", i, e))?;
 
             // Get account state for nonce/balance validation
@@ -740,7 +1233,9 @@ impl BlockValidator for NodeBlockValidator {
             if tx.nonce() < nonce {
                 return Err(format!(
                     "Transaction {} nonce too low: expected >= {}, got {}",
-                    i, nonce, tx.nonce()
+                    i,
+                    nonce,
+                    tx.nonce()
                 ));
             }
 
@@ -795,7 +1290,12 @@ impl NodeBlockBuilder {
         chain_id: u64,
         gas_limit: u64,
     ) -> Self {
-        Self { mempool, database, chain_id, gas_limit }
+        Self {
+            mempool,
+            database,
+            chain_id,
+            gas_limit,
+        }
     }
 
     /// Get parent header from database
@@ -827,7 +1327,8 @@ impl BlockBuilder for NodeBlockBuilder {
             .as_millis() as u64;
 
         // Get parent header for base fee calculation
-        let (gas_limit, base_fee) = self.get_parent_header(&parent_hash)
+        let (gas_limit, base_fee) = self
+            .get_parent_header(&parent_hash)
             .map(|parent| (parent.gas_limit, parent.next_base_fee()))
             .unwrap_or((self.gas_limit, 1_000_000_000));
 
@@ -890,15 +1391,19 @@ impl Node {
             price_bump_percentage: 10,
             max_pending_per_sender: 64,
             max_queued_per_sender: 64,
-            dedup_retention_blocks: 128,  // Keep hashes for ~128 blocks for replay protection
-            dedup_max_size: 100_000,      // Max 100k seen transaction hashes
+            dedup_retention_blocks: 128, // Keep hashes for ~128 blocks for replay protection
+            dedup_max_size: 100_000,     // Max 100k seen transaction hashes
         };
         // Use validation config with correct chain_id from node config
         let validation_config = ValidationConfig {
             chain_id: config.chain.chain_id,
             ..Default::default()
         };
-        let mempool = Arc::new(Mempool::with_validation_config(mempool_config, validation_config, state_adapter));
+        let mempool = Arc::new(Mempool::with_validation_config(
+            mempool_config,
+            validation_config,
+            state_adapter,
+        ));
 
         // Create event broadcaster
         let (event_tx, _) = broadcast::channel(1000);
@@ -939,7 +1444,8 @@ impl Node {
     /// Returns true if this was a fresh genesis initialization
     fn init_genesis(database: &Database, config: &Config) -> Result<bool> {
         // Check if genesis already exists by looking for latest_height metadata
-        if database.get_metadata(b"latest_height")
+        if database
+            .get_metadata(b"latest_height")
             .map_err(|e| anyhow::anyhow!("Failed to check metadata: {}", e))?
             .is_some()
         {
@@ -959,12 +1465,16 @@ impl Node {
             timestamp: genesis_timestamp,
             parent_hash: H256::NIL,
             transactions_root: H256::NIL,
-            state_root: H256::NIL,  // State root computed after account initialization
+            state_root: H256::NIL, // State root computed after account initialization
             receipts_root: H256::NIL,
             proposer: Address::ZERO,
             gas_limit: config.economics.block_gas_limit,
             gas_used: 0,
-            base_fee: config.economics.min_base_fee.parse().unwrap_or(1_000_000_000),
+            base_fee: config
+                .economics
+                .min_base_fee
+                .parse()
+                .unwrap_or(1_000_000_000),
             last_finality_cert_hash: None,
             validator_set_hash: H256::NIL, // TODO: Compute from genesis validators
             next_validator_set_hash: None,
@@ -975,13 +1485,19 @@ impl Node {
 
         // Encode and store the genesis block
         let encoded = genesis_block.rlp_encode();
-        database.put_block(genesis_hash.as_bytes(), &encoded)
+        database
+            .put_block(genesis_hash.as_bytes(), &encoded)
             .map_err(|e| anyhow::anyhow!("Failed to store genesis block: {}", e))?;
 
         // Store metadata
-        database.put_metadata(b"latest_height", &0u64.to_le_bytes())
+        database
+            .put_metadata(b"latest_height", &0u64.to_le_bytes())
             .map_err(|e| anyhow::anyhow!("Failed to store latest height: {}", e))?;
-        database.put_metadata(&format!("block_hash_0").into_bytes(), genesis_hash.as_bytes())
+        database
+            .put_metadata(
+                &"block_hash_0".to_string().into_bytes(),
+                genesis_hash.as_bytes(),
+            )
             .map_err(|e| anyhow::anyhow!("Failed to store genesis hash: {}", e))?;
 
         info!(
@@ -1005,12 +1521,19 @@ impl Node {
 
         for account in &config.genesis.accounts {
             // Parse address (strip 0x prefix if present)
-            let addr_hex = account.address.strip_prefix("0x").unwrap_or(&account.address);
-            let addr_bytes = hex::decode(addr_hex)
-                .map_err(|e| anyhow::anyhow!("Invalid genesis address {}: {}", account.address, e))?;
+            let addr_hex = account
+                .address
+                .strip_prefix("0x")
+                .unwrap_or(&account.address);
+            let addr_bytes = hex::decode(addr_hex).map_err(|e| {
+                anyhow::anyhow!("Invalid genesis address {}: {}", account.address, e)
+            })?;
 
             if addr_bytes.len() != 20 {
-                return Err(anyhow::anyhow!("Invalid address length for {}", account.address));
+                return Err(anyhow::anyhow!(
+                    "Invalid address length for {}",
+                    account.address
+                ));
             }
 
             let mut address = [0u8; 20];
@@ -1021,7 +1544,9 @@ impl Node {
                 u128::from_str_radix(account.balance.strip_prefix("0x").unwrap(), 16)
                     .map_err(|e| anyhow::anyhow!("Invalid balance {}: {}", account.balance, e))?
             } else {
-                account.balance.parse()
+                account
+                    .balance
+                    .parse()
                     .map_err(|e| anyhow::anyhow!("Invalid balance {}: {}", account.balance, e))?
             };
 
@@ -1037,7 +1562,8 @@ impl Node {
         }
 
         // Commit state changes to persist genesis accounts
-        state_db.commit()
+        state_db
+            .commit()
             .map_err(|e| anyhow::anyhow!("Failed to commit genesis accounts: {}", e))?;
 
         info!("Genesis accounts committed to state");
@@ -1154,7 +1680,10 @@ impl Node {
 
         // Parse boot nodes from config
         // Expected format: /ip4/1.2.3.4/tcp/30300/p2p/12D3KooW...
-        let boot_nodes: Vec<(PeerId, Multiaddr)> = self.config.network.boot_nodes
+        let boot_nodes: Vec<(PeerId, Multiaddr)> = self
+            .config
+            .network
+            .boot_nodes
             .iter()
             .filter_map(|addr_str| {
                 let addr: Multiaddr = addr_str.parse().ok()?;
@@ -1162,7 +1691,8 @@ impl Node {
                     Protocol::P2p(peer_id) => Some(peer_id),
                     _ => None,
                 })?;
-                let addr_without_p2p: Multiaddr = addr.iter()
+                let addr_without_p2p: Multiaddr = addr
+                    .iter()
                     .filter(|p| !matches!(p, Protocol::P2p(_)))
                     .collect();
                 Some((peer_id, addr_without_p2p))
@@ -1177,7 +1707,11 @@ impl Node {
         let p2p_key_path = std::path::PathBuf::from(&self.config.storage.data_dir).join("p2p.key");
 
         let network_config = NetworkConfig {
-            listen_addr: self.config.network.listen_address.parse()
+            listen_addr: self
+                .config
+                .network
+                .listen_address
+                .parse()
                 .map_err(|e| anyhow::anyhow!("Invalid listen address: {}", e))?,
             external_addr: None,
             boot_nodes,
@@ -1191,7 +1725,8 @@ impl Node {
         let (event_tx, mut event_rx) = mpsc::channel(1000);
 
         // Create the network service (returns tuple of service and handle)
-        let (mut network_service, network_handle) = NetworkService::new(network_config, event_tx).await?;
+        let (mut network_service, network_handle) =
+            NetworkService::new(network_config, event_tx).await?;
         self.network_handle = Some(network_handle);
 
         // Clone references for the event handler task
@@ -1359,10 +1894,16 @@ impl Node {
         ));
 
         // Parse addresses
-        let http_addr: SocketAddr = self.config.rpc.http_address
+        let http_addr: SocketAddr = self
+            .config
+            .rpc
+            .http_address
             .parse()
             .map_err(|e| anyhow::anyhow!("Invalid HTTP address: {}", e))?;
-        let ws_addr: SocketAddr = self.config.rpc.ws_address
+        let ws_addr: SocketAddr = self
+            .config
+            .rpc
+            .ws_address
             .parse()
             .map_err(|e| anyhow::anyhow!("Invalid WS address: {}", e))?;
 
@@ -1427,8 +1968,7 @@ impl Node {
         let sync_config = protocore_state_sync::StateSyncConfig::default();
         info!(
             "State sync configured with min_peers={}, require_finality={}",
-            sync_config.min_peers,
-            sync_config.require_finality
+            sync_config.min_peers, sync_config.require_finality
         );
 
         let mut shutdown_rx = self.shutdown_tx.as_ref().unwrap().subscribe();
@@ -1537,11 +2077,61 @@ impl Node {
         let block_data = block.rlp_encode();
         database.put_block(block_hash.as_bytes(), &block_data)?;
 
+        // Store each transaction indexed by its hash for eth_getTransactionByHash
+        for (tx_index, signed_tx) in block.transactions.iter().enumerate() {
+            let tx_hash = signed_tx.hash();
+
+            // Create transaction location data: block_hash + block_height + tx_index
+            // This allows us to reconstruct the full transaction response
+            let mut tx_location = Vec::with_capacity(32 + 8 + 8);
+            tx_location.extend_from_slice(block_hash.as_bytes());
+            tx_location.extend_from_slice(&block.header.height.to_le_bytes());
+            tx_location.extend_from_slice(&(tx_index as u64).to_le_bytes());
+
+            database.put_transaction(tx_hash.as_bytes(), &tx_location)?;
+
+            // TODO: Generate and store actual transaction receipt after EVM execution
+            // For now, we create a placeholder receipt with success status
+            let receipt_data = Self::create_receipt_data(
+                tx_hash.as_bytes(),
+                block_hash.as_bytes(),
+                block.header.height,
+                tx_index as u64,
+                true,  // success
+                21000, // gas_used (placeholder for simple transfer)
+            );
+            database.put_receipt(tx_hash.as_bytes(), &receipt_data)?;
+        }
+
         // Update latest height in metadata
         let height_bytes = block.header.height.to_le_bytes();
         database.put_metadata(b"latest_height", &height_bytes)?;
 
+        // Also store block hash -> height mapping for reverse lookup
+        let height_key = format!("block_hash_{}", block.header.height);
+        database.put_metadata(height_key.as_bytes(), block_hash.as_bytes())?;
+
         Ok(())
+    }
+
+    /// Create receipt data bytes for storage
+    /// Format: tx_hash(32) + block_hash(32) + block_height(8) + tx_index(8) + status(1) + gas_used(8)
+    fn create_receipt_data(
+        tx_hash: &[u8],
+        block_hash: &[u8],
+        block_height: u64,
+        tx_index: u64,
+        success: bool,
+        gas_used: u64,
+    ) -> Vec<u8> {
+        let mut data = Vec::with_capacity(89);
+        data.extend_from_slice(&tx_hash[..32]);
+        data.extend_from_slice(&block_hash[..32]);
+        data.extend_from_slice(&block_height.to_le_bytes());
+        data.extend_from_slice(&tx_index.to_le_bytes());
+        data.push(if success { 1 } else { 0 });
+        data.extend_from_slice(&gas_used.to_le_bytes());
+        data
     }
 
     /// Check if the node needs to sync

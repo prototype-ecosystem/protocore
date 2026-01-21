@@ -101,7 +101,9 @@ pub enum EvidenceError {
     ValidatorNotFound(ValidatorId),
 
     /// Evidence is too old
-    #[error("evidence too old: height {evidence_height}, current {current_height}, max age {max_age}")]
+    #[error(
+        "evidence too old: height {evidence_height}, current {current_height}, max age {max_age}"
+    )]
     EvidenceTooOld {
         /// Height of the evidence
         evidence_height: u64,
@@ -164,7 +166,10 @@ impl EquivocationEvidence {
 
         // Must be same height
         if vote_a.height != vote_b.height {
-            return Err(EvidenceError::DifferentHeights(vote_a.height, vote_b.height));
+            return Err(EvidenceError::DifferentHeights(
+                vote_a.height,
+                vote_b.height,
+            ));
         }
 
         // Must be same round
@@ -244,9 +249,7 @@ impl EquivocationEvidence {
     ///
     /// `Ok(())` if evidence is recent enough, or an error if too old.
     pub fn check_age(&self, current_height: u64) -> Result<(), EvidenceError> {
-        if current_height > self.height
-            && current_height - self.height > EVIDENCE_MAX_AGE_BLOCKS
-        {
+        if current_height > self.height && current_height - self.height > EVIDENCE_MAX_AGE_BLOCKS {
             return Err(EvidenceError::EvidenceTooOld {
                 evidence_height: self.height,
                 current_height,
@@ -454,19 +457,48 @@ impl EvidencePool {
 
     /// Add evidence to the pool
     ///
-    /// Returns true if evidence was added, false if it was a duplicate.
-    pub fn add(&mut self, evidence: EquivocationEvidence) -> bool {
+    /// Returns `Ok(true)` if evidence was added, `Ok(false)` if it was a duplicate,
+    /// or `Err` if the evidence is too old.
+    ///
+    /// # Arguments
+    /// * `evidence` - The equivocation evidence to add
+    /// * `current_height` - Current blockchain height for age validation
+    ///
+    /// # Security
+    /// This method enforces evidence age checking to prevent ancient evidence attacks.
+    /// Evidence older than EVIDENCE_MAX_AGE_BLOCKS is rejected.
+    pub fn add(
+        &mut self,
+        evidence: EquivocationEvidence,
+        current_height: u64,
+    ) -> Result<bool, EvidenceError> {
+        // SECURITY: Check evidence age before accepting
+        // This prevents ancient evidence attacks where old equivocations
+        // are submitted long after validators have changed stake
+        evidence.check_age(current_height)?;
+
         let hash = evidence.hash();
 
         // Check if already submitted or pending
         if self.submitted.contains(&hash) {
-            return false;
+            return Ok(false);
         }
 
         if self.pending.iter().any(|e| e.hash() == hash) {
-            return false;
+            return Ok(false);
         }
 
+        self.pending.push(evidence);
+        Ok(true)
+    }
+
+    /// Add evidence without age checking (for testing only)
+    #[cfg(test)]
+    pub fn add_unchecked(&mut self, evidence: EquivocationEvidence) -> bool {
+        let hash = evidence.hash();
+        if self.submitted.contains(&hash) || self.pending.iter().any(|e| e.hash() == hash) {
+            return false;
+        }
         self.pending.push(evidence);
         true
     }
@@ -532,11 +564,13 @@ impl EquivocationDetector {
     /// # Arguments
     ///
     /// * `vote` - The vote to check
+    /// * `current_height` - Current blockchain height for evidence age validation
     ///
     /// # Returns
     ///
     /// `Some(evidence)` if equivocation was detected, `None` otherwise.
-    pub fn check_vote(&mut self, vote: Vote) -> Option<EquivocationEvidence> {
+    /// Evidence is only returned if it passes age validation.
+    pub fn check_vote(&mut self, vote: Vote, current_height: u64) -> Option<EquivocationEvidence> {
         let key = (
             vote.height,
             vote.round,
@@ -548,11 +582,16 @@ impl EquivocationDetector {
             // Check if it's a conflicting vote (different block hash)
             if existing_vote.block_hash != vote.block_hash {
                 // Equivocation detected!
-                if let Ok(evidence) =
-                    EquivocationEvidence::new(existing_vote.clone(), vote.clone())
+                if let Ok(evidence) = EquivocationEvidence::new(existing_vote.clone(), vote.clone())
                 {
-                    self.evidence_pool.add(evidence.clone());
-                    return Some(evidence);
+                    // Add with age checking - silently ignore if too old
+                    if self
+                        .evidence_pool
+                        .add(evidence.clone(), current_height)
+                        .unwrap_or(false)
+                    {
+                        return Some(evidence);
+                    }
                 }
             }
             // Same vote seen again, ignore
@@ -580,7 +619,8 @@ impl EquivocationDetector {
     ///
     /// * `min_height` - Remove votes older than this height
     pub fn prune(&mut self, min_height: u64) {
-        self.seen_votes.retain(|(height, _, _, _), _| *height >= min_height);
+        self.seen_votes
+            .retain(|(height, _, _, _), _| *height >= min_height);
         self.evidence_pool.prune(min_height);
     }
 }
@@ -642,14 +682,7 @@ mod tests {
         let (validator_set, private_key) = create_test_validator_set();
 
         // Create two conflicting votes
-        let vote_a = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [1u8; 32],
-            0,
-        );
+        let vote_a = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [1u8; 32], 0);
 
         let vote_b = create_signed_vote(
             &private_key,
@@ -673,14 +706,7 @@ mod tests {
     fn test_same_block_hash_rejected() {
         let private_key = BlsPrivateKey::random();
 
-        let vote_a = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [1u8; 32],
-            0,
-        );
+        let vote_a = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [1u8; 32], 0);
 
         let vote_b = create_signed_vote(
             &private_key,
@@ -730,24 +756,10 @@ mod tests {
         let wrong_key = BlsPrivateKey::random();
 
         // Vote A signed with correct key
-        let vote_a = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [1u8; 32],
-            0,
-        );
+        let vote_a = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [1u8; 32], 0);
 
         // Vote B signed with wrong key
-        let vote_b = create_signed_vote(
-            &wrong_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [2u8; 32],
-            0,
-        );
+        let vote_b = create_signed_vote(&wrong_key, VoteType::Prevote, 100, 0, [2u8; 32], 0);
 
         let evidence = EquivocationEvidence::new(vote_a, vote_b).unwrap();
         let result = evidence.validate(&validator_set);
@@ -758,23 +770,9 @@ mod tests {
     fn test_evidence_age_check() {
         let private_key = BlsPrivateKey::random();
 
-        let vote_a = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [1u8; 32],
-            0,
-        );
+        let vote_a = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [1u8; 32], 0);
 
-        let vote_b = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [2u8; 32],
-            0,
-        );
+        let vote_b = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [2u8; 32], 0);
 
         let evidence = EquivocationEvidence::new(vote_a, vote_b).unwrap();
 
@@ -792,23 +790,9 @@ mod tests {
     fn test_evidence_serialization_roundtrip() {
         let private_key = BlsPrivateKey::random();
 
-        let vote_a = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            5,
-            [1u8; 32],
-            0,
-        );
+        let vote_a = create_signed_vote(&private_key, VoteType::Prevote, 100, 5, [1u8; 32], 0);
 
-        let vote_b = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            5,
-            [2u8; 32],
-            0,
-        );
+        let vote_b = create_signed_vote(&private_key, VoteType::Prevote, 100, 5, [2u8; 32], 0);
 
         let original = EquivocationEvidence::new(vote_a, vote_b).unwrap();
 
@@ -829,23 +813,9 @@ mod tests {
     fn test_evidence_hash_uniqueness() {
         let private_key = BlsPrivateKey::random();
 
-        let vote_a = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [1u8; 32],
-            0,
-        );
+        let vote_a = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [1u8; 32], 0);
 
-        let vote_b = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [2u8; 32],
-            0,
-        );
+        let vote_b = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [2u8; 32], 0);
 
         let evidence1 = EquivocationEvidence::new(vote_a.clone(), vote_b.clone()).unwrap();
         let evidence2 = EquivocationEvidence::new(vote_a, vote_b).unwrap();
@@ -859,28 +829,15 @@ mod tests {
         let private_key = BlsPrivateKey::random();
 
         let mut detector = EquivocationDetector::new();
+        let current_height = 101; // Just past the vote height of 100
 
         // First vote - no equivocation
-        let vote_a = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [1u8; 32],
-            0,
-        );
-        assert!(detector.check_vote(vote_a).is_none());
+        let vote_a = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [1u8; 32], 0);
+        assert!(detector.check_vote(vote_a, current_height).is_none());
 
         // Second vote for different block - equivocation!
-        let vote_b = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [2u8; 32],
-            0,
-        );
-        let evidence = detector.check_vote(vote_b);
+        let vote_b = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [2u8; 32], 0);
+        let evidence = detector.check_vote(vote_b, current_height);
         assert!(evidence.is_some());
 
         // Evidence should be in pool
@@ -891,34 +848,51 @@ mod tests {
     fn test_evidence_pool_deduplication() {
         let private_key = BlsPrivateKey::random();
 
-        let vote_a = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [1u8; 32],
-            0,
-        );
+        let vote_a = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [1u8; 32], 0);
 
-        let vote_b = create_signed_vote(
-            &private_key,
-            VoteType::Prevote,
-            100,
-            0,
-            [2u8; 32],
-            0,
-        );
+        let vote_b = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [2u8; 32], 0);
 
         let evidence = EquivocationEvidence::new(vote_a, vote_b).unwrap();
 
         let mut pool = EvidencePool::new();
 
-        // First add succeeds
-        assert!(pool.add(evidence.clone()));
+        // First add succeeds (evidence at height 100, current height 101 - well within age limit)
+        assert!(pool.add(evidence.clone(), 101).unwrap());
 
         // Duplicate is rejected
-        assert!(!pool.add(evidence));
+        assert!(!pool.add(evidence, 101).unwrap());
 
+        assert_eq!(pool.pending_count(), 1);
+    }
+
+    #[test]
+    fn test_evidence_pool_rejects_old_evidence() {
+        let private_key = BlsPrivateKey::random();
+        let vote_a = create_signed_vote(
+            &private_key,
+            VoteType::Prevote,
+            100, // evidence at height 100
+            0,
+            [1u8; 32],
+            0,
+        );
+
+        let vote_b = create_signed_vote(&private_key, VoteType::Prevote, 100, 0, [2u8; 32], 0);
+
+        let evidence = EquivocationEvidence::new(vote_a, vote_b).unwrap();
+
+        let mut pool = EvidencePool::new();
+
+        // Current height is way beyond max age - should be rejected
+        let too_old_height = 100 + EVIDENCE_MAX_AGE_BLOCKS + 100;
+        let result = pool.add(evidence.clone(), too_old_height);
+        assert!(result.is_err());
+        matches!(result.unwrap_err(), EvidenceError::EvidenceTooOld { .. });
+        assert_eq!(pool.pending_count(), 0);
+
+        // Within age limit - should succeed
+        let ok_height = 100 + EVIDENCE_MAX_AGE_BLOCKS - 1;
+        assert!(pool.add(evidence, ok_height).unwrap());
         assert_eq!(pool.pending_count(), 1);
     }
 }

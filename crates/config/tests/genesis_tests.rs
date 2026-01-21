@@ -2,8 +2,8 @@
 
 use alloy_primitives::{B256, U256};
 use protocore_config::{
-    ConfigError, GenesisAccount, GenesisConfig, GenesisValidator, GovernanceParams,
-    StakingConfig, StakingParams,
+    ConfigError, GenesisAccount, GenesisConfig, GenesisValidator, GovernanceParams, StakingConfig,
+    StakingParams,
 };
 
 fn test_validator() -> GenesisValidator {
@@ -229,7 +229,10 @@ fn test_staking_params_validation() {
 
     let mut invalid = params.clone();
     invalid.min_stake = "0".to_string();
-    assert!(matches!(invalid.validate(), Err(ConfigError::InvalidMinStake)));
+    assert!(matches!(
+        invalid.validate(),
+        Err(ConfigError::InvalidMinStake)
+    ));
 
     let mut invalid = params.clone();
     invalid.max_validators = 2;

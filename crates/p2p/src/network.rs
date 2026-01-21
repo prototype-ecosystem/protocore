@@ -14,7 +14,6 @@ use crate::{
 };
 use futures::StreamExt;
 use libp2p::{
-    core::transport::upgrade::Version,
     gossipsub::{self, MessageAcceptance},
     identify::Event as IdentifyEvent,
     kad::Event as KademliaEvent,
@@ -290,8 +289,9 @@ impl NetworkService {
             Some(path) => {
                 if path.exists() {
                     // Load existing key from protobuf encoding
-                    let key_bytes = std::fs::read(path)
-                        .map_err(|e| Error::Config(format!("Failed to read P2P key file: {}", e)))?;
+                    let key_bytes = std::fs::read(path).map_err(|e| {
+                        Error::Config(format!("Failed to read P2P key file: {}", e))
+                    })?;
                     let keypair = libp2p::identity::Keypair::from_protobuf_encoding(&key_bytes)
                         .map_err(|e| Error::Config(format!("Invalid P2P key: {}", e)))?;
                     let peer_id = PeerId::from(keypair.public());
@@ -300,17 +300,20 @@ impl NetworkService {
                 } else {
                     // Generate new key and save it in protobuf encoding
                     let keypair = libp2p::identity::Keypair::generate_ed25519();
-                    let key_bytes = keypair.to_protobuf_encoding()
+                    let key_bytes = keypair
+                        .to_protobuf_encoding()
                         .map_err(|e| Error::Config(format!("Failed to encode P2P key: {}", e)))?;
 
                     // Create parent directory if it doesn't exist
                     if let Some(parent) = path.parent() {
-                        std::fs::create_dir_all(parent)
-                            .map_err(|e| Error::Config(format!("Failed to create key directory: {}", e)))?;
+                        std::fs::create_dir_all(parent).map_err(|e| {
+                            Error::Config(format!("Failed to create key directory: {}", e))
+                        })?;
                     }
 
-                    std::fs::write(path, &key_bytes)
-                        .map_err(|e| Error::Config(format!("Failed to write P2P key file: {}", e)))?;
+                    std::fs::write(path, &key_bytes).map_err(|e| {
+                        Error::Config(format!("Failed to write P2P key file: {}", e))
+                    })?;
 
                     let peer_id = PeerId::from(keypair.public());
                     info!(%peer_id, path = %path.display(), "Generated and saved new P2P identity");
@@ -348,13 +351,10 @@ impl NetworkService {
             .with_dns()
             .map_err(|e| Error::Transport(e.to_string()))?
             .with_behaviour(|key| {
-                ProtocoreBehaviour::new(key, local_peer_id)
-                    .expect("Failed to create behaviour")
+                ProtocoreBehaviour::new(key, local_peer_id).expect("Failed to create behaviour")
             })
             .map_err(|e| Error::Transport(e.to_string()))?
-            .with_swarm_config(|cfg| {
-                cfg.with_idle_connection_timeout(Duration::from_secs(60))
-            })
+            .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))
             .build();
 
         // Create discovery manager
@@ -396,11 +396,13 @@ impl NetworkService {
         self.subscribe_to_topics()?;
 
         // Initialize Kademlia with boot nodes
-        self.discovery.init_kademlia(&mut self.swarm.behaviour_mut().kademlia);
+        self.discovery
+            .init_kademlia(&mut self.swarm.behaviour_mut().kademlia);
 
         // Start bootstrap
         if !self.config.boot_nodes.is_empty() {
-            self.discovery.start_bootstrap(&mut self.swarm.behaviour_mut().kademlia)?;
+            self.discovery
+                .start_bootstrap(&mut self.swarm.behaviour_mut().kademlia)?;
         } else {
             self.discovery.mark_bootstrapped();
         }
@@ -422,9 +424,12 @@ impl NetworkService {
         behaviour.subscribe(&self.topics.blocks)?;
         behaviour.subscribe(&self.topics.transactions)?;
 
-        self.subscriptions.mark_subscribed(&self.topics.consensus.to_string());
-        self.subscriptions.mark_subscribed(&self.topics.blocks.to_string());
-        self.subscriptions.mark_subscribed(&self.topics.transactions.to_string());
+        self.subscriptions
+            .mark_subscribed(&self.topics.consensus.to_string());
+        self.subscriptions
+            .mark_subscribed(&self.topics.blocks.to_string());
+        self.subscriptions
+            .mark_subscribed(&self.topics.transactions.to_string());
 
         info!("Subscribed to gossipsub topics");
         Ok(())
@@ -465,7 +470,10 @@ impl NetworkService {
     }
 
     /// Handle swarm events
-    async fn handle_swarm_event(&mut self, event: libp2p::swarm::SwarmEvent<ProtocoreBehaviourEvent>) {
+    async fn handle_swarm_event(
+        &mut self,
+        event: libp2p::swarm::SwarmEvent<ProtocoreBehaviourEvent>,
+    ) {
         match event {
             libp2p::swarm::SwarmEvent::Behaviour(behaviour_event) => {
                 self.handle_behaviour_event(behaviour_event).await;
@@ -484,7 +492,10 @@ impl NetworkService {
                     subscribed_topics: Vec::new(),
                     connected: true,
                 });
-                let _ = self.event_tx.send(NetworkEvent::PeerConnected(peer_id)).await;
+                let _ = self
+                    .event_tx
+                    .send(NetworkEvent::PeerConnected(peer_id))
+                    .await;
             }
             libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                 debug!(%peer_id, ?cause, "Connection closed");
@@ -492,7 +503,10 @@ impl NetworkService {
                 if let Some(info) = self.peer_info.get_mut(&peer_id) {
                     info.connected = false;
                 }
-                let _ = self.event_tx.send(NetworkEvent::PeerDisconnected(peer_id)).await;
+                let _ = self
+                    .event_tx
+                    .send(NetworkEvent::PeerDisconnected(peer_id))
+                    .await;
             }
             libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
                 info!(%address, "Listening on address");
@@ -644,7 +658,11 @@ impl NetworkService {
     /// Handle Identify events
     fn handle_identify_event(&mut self, event: IdentifyEvent) {
         match event {
-            IdentifyEvent::Received { peer_id, info, connection_id: _ } => {
+            IdentifyEvent::Received {
+                peer_id,
+                info,
+                connection_id: _,
+            } => {
                 debug!(%peer_id, agent = %info.agent_version, "Received identify info");
 
                 // Add addresses to Kademlia
@@ -673,10 +691,17 @@ impl NetworkService {
                         connected: true,
                     });
             }
-            IdentifyEvent::Sent { peer_id, connection_id: _ } => {
+            IdentifyEvent::Sent {
+                peer_id,
+                connection_id: _,
+            } => {
                 debug!(%peer_id, "Sent identify info");
             }
-            IdentifyEvent::Error { peer_id, error, connection_id: _ } => {
+            IdentifyEvent::Error {
+                peer_id,
+                error,
+                connection_id: _,
+            } => {
                 warn!(%peer_id, %error, "Identify error");
             }
             _ => {}
@@ -837,7 +862,10 @@ impl NetworkService {
                 .peers_to_connect(self.config.min_peers - self.discovery.connected_count())
                 .into_iter()
                 .filter_map(|record| {
-                    record.addresses.first().map(|addr| (record.peer_id, addr.clone()))
+                    record
+                        .addresses
+                        .first()
+                        .map(|addr| (record.peer_id, addr.clone()))
                 })
                 .collect();
 
@@ -848,7 +876,11 @@ impl NetworkService {
             // Start a random walk to find more peers
             if self.discovery.is_bootstrapped() {
                 let random_id = PeerDiscovery::random_peer_id();
-                let query_id = self.swarm.behaviour_mut().kademlia.get_closest_peers(random_id);
+                let query_id = self
+                    .swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .get_closest_peers(random_id);
                 self.discovery.track_query(query_id, QueryType::RandomWalk);
             }
         }
@@ -858,7 +890,10 @@ impl NetworkService {
             debug!("Refreshing peer discovery");
             self.discovery.mark_refresh_started();
 
-            if let Err(e) = self.discovery.start_bootstrap(&mut self.swarm.behaviour_mut().kademlia) {
+            if let Err(e) = self
+                .discovery
+                .start_bootstrap(&mut self.swarm.behaviour_mut().kademlia)
+            {
                 warn!(%e, "Failed to refresh peers");
             }
         }

@@ -47,12 +47,12 @@ pub struct ConsensusDdosConfig {
 impl Default for ConsensusDdosConfig {
     fn default() -> Self {
         Self {
-            max_proposals_per_height: 2,          // Allow retry after timeout
-            max_votes_per_height_round: 2,        // Prevote + precommit
+            max_proposals_per_height: 2,   // Allow retry after timeout
+            max_votes_per_height_round: 2, // Prevote + precommit
             max_messages_per_validator_per_sec: 50,
-            max_message_bytes: 2_000_000,         // 2 MB max (for large blocks)
+            max_message_bytes: 2_000_000, // 2 MB max (for large blocks)
             dedup_window: Duration::from_secs(60),
-            max_proposal_size: 1_500_000,         // 1.5 MB max block
+            max_proposal_size: 1_500_000, // 1.5 MB max block
             unauthorized_proposal_penalty: 100,
             duplicate_message_penalty: 10,
             malformed_message_penalty: 50,
@@ -242,10 +242,7 @@ impl ConsensusDdosProtection {
             self.penalize_validator(validator_id, self.config.unauthorized_proposal_penalty);
             warn!(
                 validator_id,
-                height,
-                round,
-                expected_proposer,
-                "rejected unauthorized proposal"
+                height, round, expected_proposer, "rejected unauthorized proposal"
             );
             return ConsensusValidationResult {
                 allowed: false,
@@ -311,7 +308,12 @@ impl ConsensusDdosProtection {
         }
 
         // Check rate limits
-        self.check_and_update_rate_limits(validator_id, height, round, ConsensusMessageType::Prevote)
+        self.check_and_update_rate_limits(
+            validator_id,
+            height,
+            round,
+            ConsensusMessageType::Prevote,
+        )
     }
 
     /// Check and update rate limits for a validator
@@ -354,7 +356,8 @@ impl ConsensusDdosProtection {
                     return ConsensusValidationResult {
                         allowed: false,
                         reject_reason: Some(ConsensusRejectReason::TooManyProposals),
-                        remaining_in_window: self.config
+                        remaining_in_window: self
+                            .config
                             .max_messages_per_validator_per_sec
                             .saturating_sub(state.messages_in_window),
                     };
@@ -370,7 +373,8 @@ impl ConsensusDdosProtection {
                     return ConsensusValidationResult {
                         allowed: false,
                         reject_reason: Some(ConsensusRejectReason::TooManyVotes),
-                        remaining_in_window: self.config
+                        remaining_in_window: self
+                            .config
                             .max_messages_per_validator_per_sec
                             .saturating_sub(state.messages_in_window),
                     };
@@ -387,7 +391,8 @@ impl ConsensusDdosProtection {
         ConsensusValidationResult {
             allowed: true,
             reject_reason: None,
-            remaining_in_window: self.config
+            remaining_in_window: self
+                .config
                 .max_messages_per_validator_per_sec
                 .saturating_sub(state.messages_in_window),
         }
@@ -405,7 +410,9 @@ impl ConsensusDdosProtection {
 
     /// Record a message hash as seen
     pub fn record_message(&self, message_hash: [u8; 32]) {
-        self.seen_messages.write().insert(message_hash, Instant::now());
+        self.seen_messages
+            .write()
+            .insert(message_hash, Instant::now());
     }
 
     /// Penalize a validator for misbehavior
@@ -414,7 +421,12 @@ impl ConsensusDdosProtection {
         let state = states.entry(validator_id).or_default();
         state.score -= penalty;
 
-        debug!(validator_id, penalty, new_score = state.score, "penalized validator");
+        debug!(
+            validator_id,
+            penalty,
+            new_score = state.score,
+            "penalized validator"
+        );
 
         if state.score <= self.config.ban_threshold {
             drop(states);
@@ -555,7 +567,10 @@ mod tests {
         // Height 0, round 0: proposer should be validator 0
         let result = protection.validate_proposal(1, 0, 0, 1000, &validator_set);
         assert!(!result.allowed);
-        assert_eq!(result.reject_reason, Some(ConsensusRejectReason::UnauthorizedProposer));
+        assert_eq!(
+            result.reject_reason,
+            Some(ConsensusRejectReason::UnauthorizedProposer)
+        );
 
         // Correct proposer should be allowed
         let result = protection.validate_proposal(0, 0, 0, 1000, &validator_set);
@@ -572,16 +587,31 @@ mod tests {
         let validator_set = create_test_validator_set();
 
         // First two proposals should succeed
-        assert!(protection.validate_proposal(0, 0, 0, 1000, &validator_set).allowed);
-        assert!(protection.validate_proposal(0, 0, 0, 1000, &validator_set).allowed);
+        assert!(
+            protection
+                .validate_proposal(0, 0, 0, 1000, &validator_set)
+                .allowed
+        );
+        assert!(
+            protection
+                .validate_proposal(0, 0, 0, 1000, &validator_set)
+                .allowed
+        );
 
         // Third should fail
         let result = protection.validate_proposal(0, 0, 0, 1000, &validator_set);
         assert!(!result.allowed);
-        assert_eq!(result.reject_reason, Some(ConsensusRejectReason::TooManyProposals));
+        assert_eq!(
+            result.reject_reason,
+            Some(ConsensusRejectReason::TooManyProposals)
+        );
 
         // New height should reset counter
-        assert!(protection.validate_proposal(1, 1, 0, 1000, &validator_set).allowed);
+        assert!(
+            protection
+                .validate_proposal(1, 1, 0, 1000, &validator_set)
+                .allowed
+        );
     }
 
     #[test]
@@ -594,16 +624,31 @@ mod tests {
         let validator_set = create_test_validator_set();
 
         // First two votes should succeed
-        assert!(protection.validate_vote(0, 0, 0, 100, &validator_set).allowed);
-        assert!(protection.validate_vote(0, 0, 0, 100, &validator_set).allowed);
+        assert!(
+            protection
+                .validate_vote(0, 0, 0, 100, &validator_set)
+                .allowed
+        );
+        assert!(
+            protection
+                .validate_vote(0, 0, 0, 100, &validator_set)
+                .allowed
+        );
 
         // Third should fail
         let result = protection.validate_vote(0, 0, 0, 100, &validator_set);
         assert!(!result.allowed);
-        assert_eq!(result.reject_reason, Some(ConsensusRejectReason::TooManyVotes));
+        assert_eq!(
+            result.reject_reason,
+            Some(ConsensusRejectReason::TooManyVotes)
+        );
 
         // Different round should allow votes
-        assert!(protection.validate_vote(0, 0, 1, 100, &validator_set).allowed);
+        assert!(
+            protection
+                .validate_vote(0, 0, 1, 100, &validator_set)
+                .allowed
+        );
     }
 
     #[test]
@@ -626,6 +671,9 @@ mod tests {
         // Further messages should be rejected
         let result = protection.validate_vote(1, 0, 0, 100, &validator_set);
         assert!(!result.allowed);
-        assert_eq!(result.reject_reason, Some(ConsensusRejectReason::ValidatorBanned));
+        assert_eq!(
+            result.reject_reason,
+            Some(ConsensusRejectReason::ValidatorBanned)
+        );
     }
 }

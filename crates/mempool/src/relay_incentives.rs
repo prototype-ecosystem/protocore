@@ -209,9 +209,7 @@ impl FeeDistribution {
         // Calculate shares
         let relay_share = (total_fee as u128 * relay_share_bp as u128 / 10_000) as u64;
         let burned = (total_fee as u128 * burn_bp as u128 / 10_000) as u64;
-        let proposer_share = total_fee
-            .saturating_sub(relay_share)
-            .saturating_sub(burned);
+        let proposer_share = total_fee.saturating_sub(relay_share).saturating_sub(burned);
 
         Self {
             total_fee,
@@ -334,10 +332,7 @@ impl RelayIncentivesTracker {
         // Track by relay
         {
             let mut relay_claims = self.claims_by_relay.write();
-            relay_claims
-                .entry(relay_address)
-                .or_default()
-                .push(tx_hash);
+            relay_claims.entry(relay_address).or_default().push(tx_hash);
         }
 
         // Update stats
@@ -431,11 +426,7 @@ impl RelayIncentivesTracker {
 
     /// Get pending rewards for a relay
     pub fn pending_reward(&self, relay_address: &Address) -> u64 {
-        *self
-            .pending_rewards
-            .read()
-            .get(relay_address)
-            .unwrap_or(&0)
+        *self.pending_rewards.read().get(relay_address).unwrap_or(&0)
     }
 
     /// Withdraw pending rewards

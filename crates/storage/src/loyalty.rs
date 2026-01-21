@@ -284,9 +284,8 @@ impl LoyaltyTracker {
 
         // Apply the loyalty formula: min(1.0, sqrt(months_active / maturity_months))
         let ratio = months_active / self.maturity_months as f64;
-        let score = ratio.sqrt().min(1.0);
 
-        score
+        ratio.sqrt().min(1.0)
     }
 
     /// Gets the complete loyalty status for a validator.
@@ -395,7 +394,11 @@ impl LoyaltyTracker {
         LoyaltySnapshot {
             maturity_months: self.maturity_months,
             cooldown_days: self.cooldown_days,
-            registrations: self.registrations.iter().map(|(&k, v)| (k, v.clone())).collect(),
+            registrations: self
+                .registrations
+                .iter()
+                .map(|(&k, v)| (k, v.clone()))
+                .collect(),
             banned: self.banned.iter().map(|(&k, &v)| (k, v)).collect(),
         }
     }
@@ -435,7 +438,8 @@ impl LoyaltyTracker {
 
     /// Clears expired bans (those where current_timestamp >= ban_end).
     pub fn clear_expired_bans(&mut self, current_timestamp: u64) {
-        self.banned.retain(|_, &mut ban_end| current_timestamp < ban_end);
+        self.banned
+            .retain(|_, &mut ban_end| current_timestamp < ban_end);
     }
 
     /// Clears expired cooldowns and removes those registrations.
@@ -460,4 +464,3 @@ impl Default for LoyaltyTracker {
         Self::new(24, 90)
     }
 }
-

@@ -45,7 +45,10 @@ impl std::str::FromStr for SubscriptionKind {
             "logs" => Ok(Self::Logs),
             "newpendingtransactions" => Ok(Self::NewPendingTransactions),
             "syncing" => Ok(Self::Syncing),
-            _ => Err(RpcError::InvalidParams(format!("unknown subscription type: {}", s))),
+            _ => Err(RpcError::InvalidParams(format!(
+                "unknown subscription type: {}",
+                s
+            ))),
         }
     }
 }
@@ -287,11 +290,13 @@ impl SubscriptionApiServer for SubscriptionApiImpl {
         let sub_kind: SubscriptionKind = match kind.parse() {
             Ok(k) => k,
             Err(e) => {
-                let _ = pending.reject(jsonrpsee::types::ErrorObject::owned(
-                    -32602,
-                    e.to_string(),
-                    None::<()>,
-                )).await;
+                let _ = pending
+                    .reject(jsonrpsee::types::ErrorObject::owned(
+                        -32602,
+                        e.to_string(),
+                        None::<()>,
+                    ))
+                    .await;
                 return Ok(());
             }
         };
@@ -303,7 +308,9 @@ impl SubscriptionApiServer for SubscriptionApiImpl {
             None
         };
 
-        let subscription = self.manager.create_subscription(sub_kind.clone(), log_params.clone());
+        let subscription = self
+            .manager
+            .create_subscription(sub_kind.clone(), log_params.clone());
         let sub_id = subscription.id;
 
         info!(id = sub_id, ?sub_kind, "New subscription");
@@ -491,4 +498,3 @@ impl From<&RpcBlock> for SubscriptionBlockHeader {
         }
     }
 }
-

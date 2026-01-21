@@ -52,7 +52,9 @@ pub const MAX_SEQUENTIAL_VERIFY_HEIGHT: u64 = 1000;
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum LightClientError {
     /// Trust period has expired
-    #[error("trust period expired: last trusted at {last_trusted_time}, current time {current_time}")]
+    #[error(
+        "trust period expired: last trusted at {last_trusted_time}, current time {current_time}"
+    )]
     TrustPeriodExpired {
         /// Last trusted timestamp
         last_trusted_time: u64,
@@ -500,7 +502,10 @@ impl LightClientState {
         // Verify the proof is for the correct epoch
         if proof.epoch != new_epoch {
             return Err(LightClientError::InvalidProof {
-                reason: format!("epoch mismatch: expected {}, got {}", new_epoch, proof.epoch),
+                reason: format!(
+                    "epoch mismatch: expected {}, got {}",
+                    new_epoch, proof.epoch
+                ),
             });
         }
 
@@ -633,11 +638,7 @@ pub struct BisectionHelper {
 
 impl BisectionHelper {
     /// Creates a new bisection helper
-    pub fn new(
-        from_height: u64,
-        to_height: u64,
-        epoch_config: &EpochConfig,
-    ) -> Self {
+    pub fn new(from_height: u64, to_height: u64, epoch_config: &EpochConfig) -> Self {
         let mut epoch_boundaries = Vec::new();
 
         // Find all epoch boundaries between from and to

@@ -1,7 +1,9 @@
 //! Integration tests for State snapshots
 
 use protocore_storage::db::{cf, DatabaseConfig};
-use protocore_storage::snapshot::{Snapshot, SnapshotChunk, SnapshotManager, SnapshotProgress, StateUpdate};
+use protocore_storage::snapshot::{
+    Snapshot, SnapshotChunk, SnapshotManager, SnapshotProgress, StateUpdate,
+};
 use protocore_storage::state::Account;
 use protocore_storage::{keccak256, Database};
 use std::sync::Arc;
@@ -88,9 +90,7 @@ fn test_create_empty_snapshot() {
     let (db, _temp_dir) = create_test_db();
     let manager = SnapshotManager::new(db);
 
-    let snapshot = manager
-        .create_snapshot(100, [1u8; 32], [2u8; 32])
-        .unwrap();
+    let snapshot = manager.create_snapshot(100, [1u8; 32], [2u8; 32]).unwrap();
 
     assert_eq!(snapshot.height, 100);
     assert_eq!(snapshot.chunk_count, 0);
@@ -110,9 +110,7 @@ fn test_snapshot_with_data() {
     db.put(cf::STATE, &key, &account.encode()).unwrap();
 
     let manager = SnapshotManager::new(db);
-    let snapshot = manager
-        .create_snapshot(100, [1u8; 32], [2u8; 32])
-        .unwrap();
+    let snapshot = manager.create_snapshot(100, [1u8; 32], [2u8; 32]).unwrap();
 
     assert_eq!(snapshot.height, 100);
     assert!(snapshot.chunk_count > 0 || snapshot.total_size > 0);
@@ -196,12 +194,8 @@ fn test_list_snapshots() {
     let (db, _temp_dir) = create_test_db();
     let manager = SnapshotManager::new(db);
 
-    manager
-        .create_snapshot(100, [1u8; 32], [2u8; 32])
-        .unwrap();
-    manager
-        .create_snapshot(200, [3u8; 32], [4u8; 32])
-        .unwrap();
+    manager.create_snapshot(100, [1u8; 32], [2u8; 32]).unwrap();
+    manager.create_snapshot(200, [3u8; 32], [4u8; 32]).unwrap();
 
     let snapshots = manager.list_snapshots().unwrap();
     assert_eq!(snapshots.len(), 2);
@@ -214,9 +208,7 @@ fn test_delete_snapshot() {
     let (db, _temp_dir) = create_test_db();
     let manager = SnapshotManager::new(db);
 
-    manager
-        .create_snapshot(100, [1u8; 32], [2u8; 32])
-        .unwrap();
+    manager.create_snapshot(100, [1u8; 32], [2u8; 32]).unwrap();
 
     assert!(manager.get_snapshot(100).unwrap().is_some());
 

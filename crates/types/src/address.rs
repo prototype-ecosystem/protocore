@@ -305,20 +305,17 @@ mod tests {
 
     #[test]
     fn test_address_from_hex() {
-        let addr =
-            Address::from_hex("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1").unwrap();
+        let addr = Address::from_hex("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1").unwrap();
         assert!(!addr.is_zero());
 
         // Without 0x prefix
-        let addr2 =
-            Address::from_hex("742d35Cc6634C0532925a3b844Bc9e7595f0bEb1").unwrap();
+        let addr2 = Address::from_hex("742d35Cc6634C0532925a3b844Bc9e7595f0bEb1").unwrap();
         assert_eq!(addr, addr2);
     }
 
     #[test]
     fn test_address_display() {
-        let addr =
-            Address::from_hex("0x742d35cc6634c0532925a3b844bc9e7595f0beb1").unwrap();
+        let addr = Address::from_hex("0x742d35cc6634c0532925a3b844bc9e7595f0beb1").unwrap();
         let display = addr.to_string();
         // The display should be checksummed
         assert!(display.starts_with("0x"));
@@ -344,8 +341,7 @@ mod tests {
 
     #[test]
     fn test_address_serde() {
-        let addr =
-            Address::from_hex("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1").unwrap();
+        let addr = Address::from_hex("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1").unwrap();
         let json = serde_json::to_string(&addr).unwrap();
         let decoded: Address = serde_json::from_str(&json).unwrap();
         assert_eq!(addr, decoded);
@@ -353,8 +349,7 @@ mod tests {
 
     #[test]
     fn test_create_contract_address() {
-        let sender =
-            Address::from_hex("0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0").unwrap();
+        let sender = Address::from_hex("0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0").unwrap();
         let contract = sender.create_contract_address(0);
         assert!(!contract.is_zero());
     }

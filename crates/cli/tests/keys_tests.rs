@@ -17,7 +17,7 @@ fn test_parse_key_type() {
 fn test_generate_args_defaults() {
     let args = GenerateArgs::parse_from(["generate"]);
     assert_eq!(args.key_type, "wallet");
-    assert!(args.output.is_none());
+    assert!(args.output_file.is_none());
     assert!(args.name.is_none());
     assert!(!args.password);
 }

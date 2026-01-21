@@ -509,7 +509,10 @@ impl ParticipationTracker {
     ///
     /// A slice of historical participation records, or an empty slice if none exist.
     pub fn get_history(&self, validator: &Address) -> &[EpochParticipation] {
-        self.history.get(validator).map(|v| v.as_slice()).unwrap_or(&[])
+        self.history
+            .get(validator)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Checks if a validator has any historical participation data.
@@ -697,4 +700,3 @@ impl Default for ParticipationTracker {
         Self::new(24) // Default to 24 epochs of history
     }
 }
-

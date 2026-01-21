@@ -18,11 +18,17 @@ use crate::types::{ValidatorId, ValidatorSet, Vote, VoteType, NIL_HASH};
 pub enum VoteSetError {
     /// Vote is for wrong height
     #[error("vote height {vote_height} does not match expected {expected_height}")]
-    WrongHeight { vote_height: u64, expected_height: u64 },
+    WrongHeight {
+        vote_height: u64,
+        expected_height: u64,
+    },
 
     /// Vote is for wrong round
     #[error("vote round {vote_round} does not match expected {expected_round}")]
-    WrongRound { vote_round: u64, expected_round: u64 },
+    WrongRound {
+        vote_round: u64,
+        expected_round: u64,
+    },
 
     /// Vote is for wrong type
     #[error("vote type mismatch")]
@@ -133,10 +139,7 @@ impl VoteSet {
             .signature
             .verify(&vote.signing_bytes(), &validator.pubkey)
         {
-            warn!(
-                validator_id = vote.validator_id,
-                "Invalid vote signature"
-            );
+            warn!(validator_id = vote.validator_id, "Invalid vote signature");
             return Err(VoteSetError::InvalidSignature(vote.validator_id));
         }
 
@@ -226,11 +229,7 @@ impl VoteSet {
     pub fn get_votes_for(&self, block_hash: &Hash) -> Vec<&Vote> {
         self.votes_by_hash
             .get(block_hash)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| self.votes.get(id))
-                    .collect()
-            })
+            .map(|ids| ids.iter().filter_map(|id| self.votes.get(id)).collect())
             .unwrap_or_default()
     }
 
@@ -273,7 +272,11 @@ impl VoteSet {
     /// Create a bitmap of signers for a specific block hash
     ///
     /// The bitmap has bit i set if validator i voted for this hash
-    pub fn create_signers_bitmap(&self, block_hash: &Hash, validator_set: &ValidatorSet) -> Vec<u8> {
+    pub fn create_signers_bitmap(
+        &self,
+        block_hash: &Hash,
+        validator_set: &ValidatorSet,
+    ) -> Vec<u8> {
         let voters = self.get_voters_for(block_hash);
         if voters.is_empty() {
             return Vec::new();

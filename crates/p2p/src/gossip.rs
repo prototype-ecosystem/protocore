@@ -9,9 +9,7 @@ use libp2p::gossipsub::IdentTopic;
 use serde::{Deserialize, Serialize};
 
 // Re-export consensus types for use in GossipMessage
-pub use protocore_consensus::{
-    FinalityCert, Proposal, Vote,
-};
+pub use protocore_consensus::{FinalityCert, Proposal, Vote};
 
 /// New view message for view change protocol
 #[derive(Debug, Clone, Serialize, Deserialize)]

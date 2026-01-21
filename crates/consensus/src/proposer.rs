@@ -227,7 +227,11 @@ impl ProposerSelector {
     ///
     /// * `block_height` - The block height
     /// * `backup_level` - Which backup (1 = first backup, 2 = second, etc.)
-    pub fn get_backup_proposer(&self, block_height: u64, backup_level: usize) -> ProposerResult<Address> {
+    pub fn get_backup_proposer(
+        &self,
+        block_height: u64,
+        backup_level: usize,
+    ) -> ProposerResult<Address> {
         if self.current_order.is_empty() {
             return Err(ProposerError::EmptyValidatorSet);
         }
@@ -317,7 +321,11 @@ impl ProposerSelector {
     /// Force an immediate validator set change and reshuffle
     ///
     /// Use with caution - this invalidates the current epoch's remaining proposer slots.
-    pub fn force_validator_change(&mut self, new_validators: Vec<Address>, randomness: [u8; 32]) -> ProposerResult<()> {
+    pub fn force_validator_change(
+        &mut self,
+        new_validators: Vec<Address>,
+        randomness: [u8; 32],
+    ) -> ProposerResult<()> {
         warn!(
             epoch = self.epoch,
             position = self.position,
@@ -360,7 +368,7 @@ impl ProposerSelector {
         let mut hasher = Sha256::new();
         hasher.update(SHUFFLE_DOMAIN);
         hasher.update(randomness);
-        hasher.update(&epoch.to_le_bytes());
+        hasher.update(epoch.to_le_bytes());
 
         let hash = hasher.finalize();
         let mut seed = [0u8; 32];
@@ -376,7 +384,7 @@ impl ProposerSelector {
         let mut hasher = Sha256::new();
         hasher.update(b"PROJECTED_RANDOMNESS");
         hasher.update(current);
-        hasher.update(&target_epoch.to_le_bytes());
+        hasher.update(target_epoch.to_le_bytes());
 
         let hash = hasher.finalize();
         let mut result = [0u8; 32];
@@ -561,8 +569,15 @@ impl ProposerStats {
     pub fn from_selector(selector: &ProposerSelector) -> Self {
         Self {
             epoch: selector.current_epoch(),
-            epoch_progress: format!("{}/{}", selector.current_position(), selector.epoch_length()),
-            current_proposer: selector.current_order().get(selector.current_position()).copied(),
+            epoch_progress: format!(
+                "{}/{}",
+                selector.current_position(),
+                selector.epoch_length()
+            ),
+            current_proposer: selector
+                .current_order()
+                .get(selector.current_position())
+                .copied(),
             blocks_produced: selector.current_position() as u64,
             blocks_missed: 0,
             validator_misses: HashMap::new(),
@@ -575,4 +590,3 @@ impl ProposerStats {
         *self.validator_misses.entry(validator).or_insert(0) += 1;
     }
 }
-

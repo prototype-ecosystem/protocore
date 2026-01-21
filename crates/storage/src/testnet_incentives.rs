@@ -277,7 +277,7 @@ impl UserStats {
 
         // Check minimum stake duration (simplified: check validator epochs)
         let has_min_stake = self.validator_epochs > 0
-            || self.first_activity.map_or(false, |first| {
+            || self.first_activity.is_some_and(|first| {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
@@ -410,7 +410,12 @@ impl TestnetIncentivesTracker {
     }
 
     /// Record a transaction sent
-    pub fn record_transaction_sent(&self, sender: Address, block_height: u64, tx_hash: Option<&str>) {
+    pub fn record_transaction_sent(
+        &self,
+        sender: Address,
+        block_height: u64,
+        tx_hash: Option<&str>,
+    ) {
         let mut event = ParticipationEvent::new(
             sender,
             ActivityType::TransactionSent,
@@ -487,7 +492,12 @@ impl TestnetIncentivesTracker {
     }
 
     /// Record community contribution (manual)
-    pub fn record_community_contribution(&self, contributor: Address, points: u64, description: &str) {
+    pub fn record_community_contribution(
+        &self,
+        contributor: Address,
+        points: u64,
+        description: &str,
+    ) {
         let event =
             ParticipationEvent::new(contributor, ActivityType::CommunityContribution, points, 0)
                 .with_metadata(description);

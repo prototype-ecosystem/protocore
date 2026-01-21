@@ -36,7 +36,8 @@ use std::collections::HashMap;
 use tracing::{debug, info};
 
 use super::{
-    abi, governance_selectors, PrecompileError, PrecompileOutput, GOVERNANCE_ADDRESS,
+    abi, governance_selectors, staking::StakingPrecompile, PrecompileError, PrecompileOutput,
+    GOVERNANCE_ADDRESS,
 };
 use crate::state_adapter::StateAdapter;
 
@@ -410,7 +411,8 @@ impl GovernancePrecompile {
 
         let amount_u256 = abi::decode_u256(data, 32)
             .ok_or_else(|| PrecompileError::InvalidInput("expected amount".into()))?;
-        let amount = amount_u256.as_limbs()[0] as u128 | ((amount_u256.as_limbs()[1] as u128) << 64);
+        let amount =
+            amount_u256.as_limbs()[0] as u128 | ((amount_u256.as_limbs()[1] as u128) << 64);
 
         let mut description_hash = [0u8; 32];
         if data.len() >= 96 {
@@ -644,7 +646,11 @@ impl GovernancePrecompile {
             "Vote recorded"
         );
 
-        Ok(PrecompileOutput::with_logs(Bytes::new(), GAS_VOTE, vec![log]))
+        Ok(PrecompileOutput::with_logs(
+            Bytes::new(),
+            GAS_VOTE,
+            vec![log],
+        ))
     }
 
     /// Execute a passed proposal
@@ -734,7 +740,11 @@ impl GovernancePrecompile {
 
         info!(proposal_id = proposal_id, "Proposal executed");
 
-        Ok(PrecompileOutput::with_logs(Bytes::new(), GAS_EXECUTE, vec![log]))
+        Ok(PrecompileOutput::with_logs(
+            Bytes::new(),
+            GAS_EXECUTE,
+            vec![log],
+        ))
     }
 
     /// Get proposal details (view function)
@@ -799,8 +809,7 @@ impl GovernancePrecompile {
         }
 
         // Voting ended, check results
-        let total_votes =
-            proposal.for_votes + proposal.against_votes + proposal.abstain_votes;
+        let total_votes = proposal.for_votes + proposal.against_votes + proposal.abstain_votes;
         let quorum = (QUORUM_PERCENTAGE as u128) * state.total_stake / 100;
 
         if total_votes < quorum {
@@ -822,22 +831,48 @@ impl GovernancePrecompile {
     }
 
     /// Get voting power for an address
+    ///
+    /// Voting power is calculated as:
+    /// - For validators: total_stake (self-stake + delegations received)
+    /// - For non-validators: sum of their delegation amounts
+    ///
+    /// Note: If an account is both a validator and a delegator to other validators,
+    /// their voting power includes both their validator stake and their delegations.
     fn get_voting_power<DB: Database>(
-        _db: &StateAdapter<DB>,
-        _account: Address,
+        db: &mut StateAdapter<DB>,
+        account: Address,
     ) -> Result<u128, PrecompileError>
     where
         DB::Error: std::fmt::Debug,
     {
-        // In a real implementation, this would read from staking state
-        // Voting power = own stake + delegations received
-        Ok(100_000 * 10u128.pow(18)) // Placeholder: 100,000 MCN
+        // Read staking state to get actual voting power
+        let staking_state = StakingPrecompile::get_staking_state(db)?;
+
+        let mut voting_power = 0u128;
+
+        // Check if account is a validator - use their total_stake
+        // (which includes self-stake + delegations they received)
+        if let Some(validator) = staking_state.validators.get(&account) {
+            voting_power += validator.total_stake;
+        }
+
+        // Add delegations made by this account to OTHER validators
+        // (this covers the case where a non-validator delegates)
+        if let Some(delegations) = staking_state.delegations.get(&account) {
+            for (validator_addr, delegation) in delegations.iter() {
+                // Only count delegations to OTHER validators to avoid double-counting
+                // (self-stake is already in total_stake for validators)
+                if validator_addr != &account {
+                    voting_power += delegation.amount;
+                }
+            }
+        }
+
+        Ok(voting_power)
     }
 
     /// Load governance state from storage
-    fn load_state<DB: Database>(
-        _db: &StateAdapter<DB>,
-    ) -> Result<GovernanceState, PrecompileError>
+    fn load_state<DB: Database>(_db: &StateAdapter<DB>) -> Result<GovernanceState, PrecompileError>
     where
         DB::Error: std::fmt::Debug,
     {
@@ -891,11 +926,7 @@ impl GovernancePrecompile {
         data.extend_from_slice(&abi::encode_u256(U256::from(voting_start)));
         data.extend_from_slice(&abi::encode_u256(U256::from(voting_end)));
 
-        revm::primitives::Log::new_unchecked(
-            GOVERNANCE_ADDRESS,
-            topics,
-            Bytes::from(data),
-        )
+        revm::primitives::Log::new_unchecked(GOVERNANCE_ADDRESS, topics, Bytes::from(data))
     }
 
     /// Create VoteCast event log
@@ -923,11 +954,7 @@ impl GovernancePrecompile {
         data.extend_from_slice(&abi::encode_u8(support as u8));
         data.extend_from_slice(&abi::encode_u256(U256::from(weight)));
 
-        revm::primitives::Log::new_unchecked(
-            GOVERNANCE_ADDRESS,
-            topics,
-            Bytes::from(data),
-        )
+        revm::primitives::Log::new_unchecked(GOVERNANCE_ADDRESS, topics, Bytes::from(data))
     }
 
     /// Create ProposalExecuted event log

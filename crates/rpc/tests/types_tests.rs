@@ -1,15 +1,25 @@
 //! Tests for RPC types
 
-use protocore_rpc::types::{
-    Address, BlockNumberOrTag, CallRequest, H256, HexBytes, HexU64,
-};
+use protocore_rpc::types::{Address, BlockNumberOrTag, CallRequest, HexBytes, HexU64, H256};
 
 #[test]
 fn test_block_number_or_tag_parse() {
-    assert_eq!("latest".parse::<BlockNumberOrTag>().unwrap(), BlockNumberOrTag::Latest);
-    assert_eq!("pending".parse::<BlockNumberOrTag>().unwrap(), BlockNumberOrTag::Pending);
-    assert_eq!("earliest".parse::<BlockNumberOrTag>().unwrap(), BlockNumberOrTag::Earliest);
-    assert_eq!("0x10".parse::<BlockNumberOrTag>().unwrap(), BlockNumberOrTag::Number(16));
+    assert_eq!(
+        "latest".parse::<BlockNumberOrTag>().unwrap(),
+        BlockNumberOrTag::Latest
+    );
+    assert_eq!(
+        "pending".parse::<BlockNumberOrTag>().unwrap(),
+        BlockNumberOrTag::Pending
+    );
+    assert_eq!(
+        "earliest".parse::<BlockNumberOrTag>().unwrap(),
+        BlockNumberOrTag::Earliest
+    );
+    assert_eq!(
+        "0x10".parse::<BlockNumberOrTag>().unwrap(),
+        BlockNumberOrTag::Number(16)
+    );
 }
 
 #[test]

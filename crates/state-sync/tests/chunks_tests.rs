@@ -4,11 +4,10 @@
 
 use protocore_state_sync::{
     chunks::{
-        ChunkDownloadProgress, ChunkId, ChunkProof, ChunkReassembler, ChunkRequest,
-        ChunkResponse, ChunkVerifier, StateChunk,
+        ChunkDownloadProgress, ChunkId, ChunkProof, ChunkReassembler, ChunkRequest, ChunkResponse,
+        ChunkVerifier, StateChunk,
     },
     keccak256,
-    Hash,
 };
 use std::time::Duration;
 
@@ -29,14 +28,7 @@ fn test_state_chunk_verification() {
     let data_hash = keccak256(&data);
     let proof = ChunkProof::empty(data_hash);
 
-    let chunk = StateChunk::new(
-        id,
-        vec![0],
-        vec![255],
-        data,
-        proof,
-        10,
-    );
+    let chunk = StateChunk::new(id, vec![0], vec![255], data, proof, 10);
 
     assert!(chunk.verify_data_hash());
 }
@@ -53,14 +45,7 @@ fn test_chunk_verifier() {
     let id = ChunkId::new(100, 0);
     let proof = ChunkProof::empty(state_root);
 
-    let chunk = StateChunk::new(
-        id,
-        vec![0],
-        vec![255],
-        chunk_data,
-        proof,
-        1,
-    );
+    let chunk = StateChunk::new(id, vec![0], vec![255], chunk_data, proof, 1);
 
     let result = verifier.verify(&chunk);
     assert!(result.is_ok());

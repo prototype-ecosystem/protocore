@@ -15,8 +15,8 @@ use parking_lot::RwLock;
 use thiserror::Error;
 use tracing::{debug, info};
 
-use protocore_crypto::Hash;
 use crate::types::{FinalityCert, ValidatorSet};
+use protocore_crypto::Hash;
 
 /// Errors that can occur during fork choice operations
 #[derive(Error, Debug)]
@@ -319,7 +319,7 @@ impl ChainSelector {
             ForkChoiceRule::HighestFinalized => {
                 // Prefer the chain with higher finalized block
                 match (&current.finality_cert, &candidate.finality_cert) {
-                    (None, Some(_)) => true, // Candidate is finalized, current is not
+                    (None, Some(_)) => true,  // Candidate is finalized, current is not
                     (Some(_), None) => false, // Current is finalized, candidate is not
                     (Some(c), Some(d)) => d.height > c.height, // Both finalized, higher wins
                     (None, None) => candidate.height > current.height, // Neither finalized, longest chain

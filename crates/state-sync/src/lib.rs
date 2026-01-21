@@ -102,11 +102,10 @@ pub use snapshot::{
     SnapshotStatus,
 };
 pub use sync::{
-    SyncPhase, SyncProgress, SyncStatus, StateSyncConfig, StateSyncError, StateSyncManager,
+    StateSyncConfig, StateSyncError, StateSyncManager, SyncPhase, SyncProgress, SyncStatus,
 };
 
 use sha3::{Digest, Keccak256};
-use thiserror::Error;
 
 /// A 32-byte hash type used throughout the state sync layer
 pub type Hash = [u8; 32];
@@ -178,4 +177,3 @@ pub fn hex_to_hash(s: &str) -> std::result::Result<Hash, hex::FromHexError> {
     hash.copy_from_slice(&bytes);
     Ok(hash)
 }
-

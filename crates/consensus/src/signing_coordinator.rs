@@ -210,7 +210,11 @@ pub struct SigningKey {
 impl SigningKey {
     /// Create a new signing key
     pub fn new(height: u64, round: u64, step: Step) -> Self {
-        Self { height, round, step }
+        Self {
+            height,
+            round,
+            step,
+        }
     }
 }
 
@@ -233,11 +237,7 @@ pub struct LeaderLease {
 
 impl LeaderLease {
     /// Create a new leader lease
-    pub fn new(
-        leader_node_id: String,
-        validator_id: ValidatorId,
-        duration_ms: u64,
-    ) -> Self {
+    pub fn new(leader_node_id: String, validator_id: ValidatorId, duration_ms: u64) -> Self {
         let now_ms = current_time_ms();
         Self {
             leader_node_id,
@@ -295,7 +295,7 @@ impl<'a> SigningLockGuard<'a> {
     }
 }
 
-impl<'a> Drop for SigningLockGuard<'a> {
+impl Drop for SigningLockGuard<'_> {
     fn drop(&mut self) {
         // The actual unlock is handled by the coordinator tracking
         debug!(
@@ -335,7 +335,11 @@ pub struct SigningCoordinator {
 
 impl SigningCoordinator {
     /// Create a new signing coordinator
-    pub fn new(config: SigningCoordinatorConfig, node_id: String, validator_id: ValidatorId) -> Self {
+    pub fn new(
+        config: SigningCoordinatorConfig,
+        node_id: String,
+        validator_id: ValidatorId,
+    ) -> Self {
         let initial_role = if config.start_as_follower {
             SigningRole::Follower
         } else {
@@ -478,7 +482,8 @@ impl SigningCoordinator {
             return Ok(());
         }
 
-        let needs_renewal = self.leader_lease
+        let needs_renewal = self
+            .leader_lease
             .read()
             .as_ref()
             .map(|l| l.needs_renewal(self.config.lease_renewal_threshold_ms))
@@ -530,7 +535,11 @@ impl SigningCoordinator {
         {
             let history = self.signing_history.lock();
             if history.contains_key(&key) {
-                return Err(SigningCoordinatorError::AlreadySigned { height, round, step });
+                return Err(SigningCoordinatorError::AlreadySigned {
+                    height,
+                    round,
+                    step,
+                });
             }
         }
 
@@ -566,7 +575,11 @@ impl SigningCoordinator {
         {
             let mut history = self.signing_history.lock();
             if history.contains_key(&key) {
-                return Err(SigningCoordinatorError::AlreadySigned { height, round, step });
+                return Err(SigningCoordinatorError::AlreadySigned {
+                    height,
+                    round,
+                    step,
+                });
             }
             history.insert(key, record);
         }
@@ -749,11 +762,9 @@ impl SigningCoordinator {
         };
 
         match tokio::fs::read(path).await {
-            Ok(data) => {
-                Self::decode_lease(&data)
-                    .map(Some)
-                    .ok_or_else(|| SigningCoordinatorError::SharedStateError("Failed to decode lease".to_string()))
-            }
+            Ok(data) => Self::decode_lease(&data).map(Some).ok_or_else(|| {
+                SigningCoordinatorError::SharedStateError("Failed to decode lease".to_string())
+            }),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(SigningCoordinatorError::IoError(e.to_string())),
         }
@@ -1024,7 +1035,10 @@ mod tests {
 
         // Now should be recorded
         assert!(coordinator.has_signed(100, 0, Step::Prevote));
-        assert_eq!(coordinator.get_signed_hash(100, 0, Step::Prevote), Some(hash));
+        assert_eq!(
+            coordinator.get_signed_hash(100, 0, Step::Prevote),
+            Some(hash)
+        );
     }
 
     #[tokio::test]
@@ -1035,9 +1049,15 @@ mod tests {
         coordinator.try_acquire_leadership().await.unwrap();
 
         // Record signings at various heights
-        coordinator.record_signing(100, 0, Step::Prevote, [1u8; 32]).unwrap();
-        coordinator.record_signing(101, 0, Step::Prevote, [2u8; 32]).unwrap();
-        coordinator.record_signing(102, 0, Step::Prevote, [3u8; 32]).unwrap();
+        coordinator
+            .record_signing(100, 0, Step::Prevote, [1u8; 32])
+            .unwrap();
+        coordinator
+            .record_signing(101, 0, Step::Prevote, [2u8; 32])
+            .unwrap();
+        coordinator
+            .record_signing(102, 0, Step::Prevote, [3u8; 32])
+            .unwrap();
 
         // Prune history below height 101
         coordinator.prune_history(101);

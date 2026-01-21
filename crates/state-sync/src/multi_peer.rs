@@ -15,15 +15,14 @@
 //! 3. **Handle Failures**: Gracefully handle peer disconnections and timeouts
 //! 4. **Fair Distribution**: Don't overload any single peer
 
-use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
-use tokio::sync::{mpsc, Semaphore};
-use tracing::{debug, info, warn};
+use tokio::sync::Semaphore;
+use tracing::{debug, warn};
 
-use crate::{Hash, PeerId, DEFAULT_MAX_CONCURRENT_DOWNLOADS};
+use crate::{PeerId, DEFAULT_MAX_CONCURRENT_DOWNLOADS};
 
 // ============================================================================
 // Configuration
@@ -216,7 +215,8 @@ impl PeerScorer {
 
     /// Record successful download
     pub fn record_success(&mut self, peer_id: PeerId, bytes: u64, duration_ms: u64) {
-        self.get_or_create(peer_id).record_success(bytes, duration_ms);
+        self.get_or_create(peer_id)
+            .record_success(bytes, duration_ms);
     }
 
     /// Record failed download
@@ -319,22 +319,17 @@ pub struct ChunkAssignment {
 }
 
 /// Strategy for assigning chunks to peers
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AssignmentStrategy {
     /// Round-robin assignment
     RoundRobin,
     /// Assign to fastest available peer
     FastestFirst,
     /// Assign based on peer capacity (bandwidth * available slots)
+    #[default]
     Capacity,
     /// Random assignment
     Random,
-}
-
-impl Default for AssignmentStrategy {
-    fn default() -> Self {
-        AssignmentStrategy::Capacity
-    }
 }
 
 /// Chunk assignment manager
@@ -531,10 +526,7 @@ pub enum DownloadResult {
         error: String,
     },
     /// Download timed out
-    Timeout {
-        chunk_index: u64,
-        peer_id: PeerId,
-    },
+    Timeout { chunk_index: u64, peer_id: PeerId },
 }
 
 /// Multi-peer download pipeline

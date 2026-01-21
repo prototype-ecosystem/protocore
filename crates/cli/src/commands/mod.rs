@@ -12,8 +12,8 @@ pub mod staking;
 pub mod start;
 pub mod upgrade;
 
-use clap::{Parser, Subcommand};
 use crate::utils::{CliResult, OutputFormat};
+use clap::{Parser, Subcommand};
 
 /// Proto Core - A high-performance blockchain implementation
 #[derive(Parser, Debug)]
@@ -135,39 +135,17 @@ pub async fn run_cli(cli: Cli) -> CliResult<()> {
         .init();
 
     match cli.command {
-        Commands::Init(args) => {
-            init::execute(args, cli.output).await
-        }
-        Commands::Start(args) => {
-            start::execute(args, cli.output).await
-        }
-        Commands::Keys(cmd) => {
-            keys::execute(cmd, cli.output).await
-        }
-        Commands::Query(cmd) => {
-            query::execute(cmd, cli.output).await
-        }
-        Commands::Staking(cmd) => {
-            staking::execute(cmd, cli.output).await
-        }
-        Commands::Governance(cmd) => {
-            governance::execute(cmd, cli.output).await
-        }
-        Commands::Integrity(cmd) => {
-            integrity::execute(cmd, cli.output).await
-        }
-        Commands::Upgrade(cmd) => {
-            upgrade::execute(cmd, cli.output).await
-        }
-        Commands::Export(args) => {
-            execute_export(args, cli.output).await
-        }
-        Commands::Import(args) => {
-            execute_import(args, cli.output).await
-        }
-        Commands::Version => {
-            execute_version(cli.output)
-        }
+        Commands::Init(args) => init::execute(args, cli.output).await,
+        Commands::Start(args) => start::execute(args, cli.output).await,
+        Commands::Keys(cmd) => keys::execute(cmd, cli.output).await,
+        Commands::Query(cmd) => query::execute(cmd, cli.output).await,
+        Commands::Staking(cmd) => staking::execute(cmd, cli.output).await,
+        Commands::Governance(cmd) => governance::execute(cmd, cli.output).await,
+        Commands::Integrity(cmd) => integrity::execute(cmd, cli.output).await,
+        Commands::Upgrade(cmd) => upgrade::execute(cmd, cli.output).await,
+        Commands::Export(args) => execute_export(args, cli.output).await,
+        Commands::Import(args) => execute_import(args, cli.output).await,
+        Commands::Version => execute_version(cli.output),
     }
 }
 
@@ -187,7 +165,8 @@ async fn execute_export(args: ExportArgs, output_format: OutputFormat) -> CliRes
         }
     }
 
-    let height_str = args.height
+    let height_str = args
+        .height
         .map(|h| h.to_string())
         .unwrap_or_else(|| "latest".to_string());
 
@@ -235,7 +214,8 @@ async fn execute_import(args: ImportArgs, output_format: OutputFormat) -> CliRes
         print_warning("Skipping state root verification - data integrity not guaranteed");
     }
 
-    let data_dir = args.data_dir
+    let data_dir = args
+        .data_dir
         .unwrap_or_else(|| crate::default_data_dir().to_string_lossy().to_string());
 
     // TODO: Implement actual import logic with protocore-storage
@@ -298,12 +278,8 @@ impl VersionInfo {
     fn new() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            git_commit: option_env!("GIT_COMMIT")
-                .unwrap_or("unknown")
-                .to_string(),
-            build_time: option_env!("BUILD_TIME")
-                .unwrap_or("unknown")
-                .to_string(),
+            git_commit: option_env!("GIT_COMMIT").unwrap_or("unknown").to_string(),
+            build_time: option_env!("BUILD_TIME").unwrap_or("unknown").to_string(),
             rust_version: option_env!("RUSTC_VERSION")
                 .unwrap_or(env!("CARGO_PKG_RUST_VERSION"))
                 .to_string(),
@@ -311,4 +287,3 @@ impl VersionInfo {
         }
     }
 }
-

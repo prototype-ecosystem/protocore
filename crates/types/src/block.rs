@@ -352,21 +352,12 @@ impl fmt::Display for BlockHeader {
 }
 
 /// A complete block containing header and transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Block {
     /// The block header
     pub header: BlockHeader,
     /// The transactions in this block
     pub transactions: Vec<SignedTransaction>,
-}
-
-impl Default for Block {
-    fn default() -> Self {
-        Self {
-            header: BlockHeader::default(),
-            transactions: Vec::new(),
-        }
-    }
 }
 
 impl Block {
@@ -535,7 +526,7 @@ impl FinalityCert {
     /// Returns the hash of this finality certificate.
     pub fn hash(&self) -> H256 {
         let mut hasher = Keccak256::new();
-        hasher.update(&self.height.to_le_bytes());
+        hasher.update(self.height.to_le_bytes());
         hasher.update(self.block_hash.as_bytes());
         hasher.update(&self.aggregate_signature);
         hasher.update(&self.signers_bitmap);
@@ -624,4 +615,3 @@ mod hex_bytes {
         hex::decode(s).map_err(serde::de::Error::custom)
     }
 }
-

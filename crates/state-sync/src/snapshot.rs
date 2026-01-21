@@ -16,7 +16,7 @@
 //! - `SnapshotRequest`: Request available snapshots from peers
 //! - `SnapshotList`: Response containing available snapshot metadata
 
-use crate::{keccak256, keccak256_concat, Hash, PeerId};
+use crate::{keccak256_concat, Hash, PeerId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -583,20 +583,14 @@ impl SnapshotSelector {
 
     /// Select the best snapshot from available options
     pub fn select_best<'a>(&self, snapshots: &'a [SnapshotInfo]) -> Option<&'a SnapshotInfo> {
-        let candidates: Vec<_> = snapshots
-            .iter()
-            .filter(|s| self.is_candidate(s))
-            .collect();
+        let candidates: Vec<_> = snapshots.iter().filter(|s| self.is_candidate(s)).collect();
 
         if candidates.is_empty() {
             return None;
         }
 
         // Score and sort candidates
-        let mut scored: Vec<_> = candidates
-            .into_iter()
-            .map(|s| (self.score(s), s))
-            .collect();
+        let mut scored: Vec<_> = candidates.into_iter().map(|s| (self.score(s), s)).collect();
 
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -722,11 +716,7 @@ impl SnapshotAvailability {
     pub fn at_height(&self, height: u64) -> Vec<&SnapshotInfo> {
         self.by_height
             .get(&height)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| self.snapshots.get(id))
-                    .collect()
-            })
+            .map(|ids| ids.iter().filter_map(|id| self.snapshots.get(id)).collect())
             .unwrap_or_default()
     }
 
@@ -760,4 +750,3 @@ fn rand_request_id() -> u64 {
     );
     hasher.finish()
 }
-

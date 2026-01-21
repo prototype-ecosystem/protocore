@@ -3,11 +3,9 @@
 //! Tests extracted from sync.rs
 
 use protocore_state_sync::{
-    keccak256,
     snapshot::SnapshotMetadata,
     sync::{SyncPhase, SyncProgress, SyncResumeState, SyncStatus},
 };
-use std::time::Duration;
 
 #[test]
 fn test_sync_status_progress() {

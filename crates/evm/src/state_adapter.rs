@@ -98,13 +98,10 @@ impl<DB: Database> StateAdapter<DB> {
 
     /// Set account balance (pending until commit)
     pub fn set_balance(&mut self, address: Address, balance: U256) -> Result<(), DB::Error> {
-        let account = self.pending_accounts.entry(address).or_insert_with(|| {
-            self.db
-                .basic(address)
-                .ok()
-                .flatten()
-                .unwrap_or_default()
-        });
+        let account = self
+            .pending_accounts
+            .entry(address)
+            .or_insert_with(|| self.db.basic(address).ok().flatten().unwrap_or_default());
         account.balance = balance;
         Ok(())
     }
@@ -123,13 +120,10 @@ impl<DB: Database> StateAdapter<DB> {
 
     /// Increment account nonce (pending until commit)
     pub fn increment_nonce(&mut self, address: Address) -> Result<(), DB::Error> {
-        let account = self.pending_accounts.entry(address).or_insert_with(|| {
-            self.db
-                .basic(address)
-                .ok()
-                .flatten()
-                .unwrap_or_default()
-        });
+        let account = self
+            .pending_accounts
+            .entry(address)
+            .or_insert_with(|| self.db.basic(address).ok().flatten().unwrap_or_default());
         account.nonce += 1;
         Ok(())
     }
@@ -316,7 +310,11 @@ impl Database for MemoryDb {
     }
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        Ok(self.block_hashes.get(&number).copied().unwrap_or(B256::ZERO))
+        Ok(self
+            .block_hashes
+            .get(&number)
+            .copied()
+            .unwrap_or(B256::ZERO))
     }
 }
 
@@ -346,10 +344,9 @@ impl StateRootProvider for MemoryDb {
         if self.accounts.is_empty() {
             // Empty trie root (keccak256 of RLP empty string)
             return B256::from_slice(&[
-                0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6,
-                0xff, 0x83, 0x45, 0xe6, 0x92, 0xc0, 0xf8, 0x6e,
-                0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c, 0xad, 0xc0,
-                0x01, 0x62, 0x2f, 0xb5, 0xe3, 0x63, 0xb4, 0x21,
+                0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6, 0xff, 0x83, 0x45, 0xe6, 0x92, 0xc0,
+                0xf8, 0x6e, 0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c, 0xad, 0xc0, 0x01, 0x62, 0x2f, 0xb5,
+                0xe3, 0x63, 0xb4, 0x21,
             ]);
         }
 
@@ -361,8 +358,8 @@ impl StateRootProvider for MemoryDb {
         let mut hasher = Keccak256::new();
         for (address, account) in sorted_accounts {
             hasher.update(address.as_slice());
-            hasher.update(&account.balance.to_be_bytes::<32>());
-            hasher.update(&account.nonce.to_be_bytes());
+            hasher.update(account.balance.to_be_bytes::<32>());
+            hasher.update(account.nonce.to_be_bytes());
             hasher.update(account.code_hash.as_slice());
 
             // Include storage hash
@@ -370,8 +367,8 @@ impl StateRootProvider for MemoryDb {
                 let mut storage_sorted: Vec<_> = storage.iter().collect();
                 storage_sorted.sort_by(|a, b| a.0.cmp(b.0));
                 for (slot, value) in storage_sorted {
-                    hasher.update(&slot.to_be_bytes::<32>());
-                    hasher.update(&value.to_be_bytes::<32>());
+                    hasher.update(slot.to_be_bytes::<32>());
+                    hasher.update(value.to_be_bytes::<32>());
                 }
             }
         }
@@ -453,10 +450,9 @@ mod tests {
         assert_eq!(
             root_before,
             B256::from_slice(&[
-                0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6,
-                0xff, 0x83, 0x45, 0xe6, 0x92, 0xc0, 0xf8, 0x6e,
-                0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c, 0xad, 0xc0,
-                0x01, 0x62, 0x2f, 0xb5, 0xe3, 0x63, 0xb4, 0x21,
+                0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6, 0xff, 0x83, 0x45, 0xe6, 0x92, 0xc0,
+                0xf8, 0x6e, 0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c, 0xad, 0xc0, 0x01, 0x62, 0x2f, 0xb5,
+                0xe3, 0x63, 0xb4, 0x21,
             ]),
             "Empty state should have empty trie root"
         );
@@ -472,8 +468,15 @@ mod tests {
 
         // State root must change after modification
         let root_after = db.state_root();
-        assert_ne!(root_before, root_after, "State root should change after account insertion");
-        assert_ne!(root_after, B256::ZERO, "State root should not be zero after modification");
+        assert_ne!(
+            root_before, root_after,
+            "State root should change after account insertion"
+        );
+        assert_ne!(
+            root_after,
+            B256::ZERO,
+            "State root should not be zero after modification"
+        );
 
         // Same state should produce same root (deterministic)
         let root_again = db.state_root();
@@ -487,7 +490,10 @@ mod tests {
         };
         db.insert_account(addr, account2);
         let root_after_update = db.state_root();
-        assert_ne!(root_after, root_after_update, "State root should change after balance update");
+        assert_ne!(
+            root_after, root_after_update,
+            "State root should change after balance update"
+        );
     }
 
     #[test]
@@ -509,8 +515,7 @@ mod tests {
 
         // Storage changes should affect state root
         assert_ne!(
-            root_before_storage,
-            root_after_storage,
+            root_before_storage, root_after_storage,
             "Storage changes should affect state root"
         );
     }

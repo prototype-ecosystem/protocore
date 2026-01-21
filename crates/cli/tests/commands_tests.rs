@@ -2,12 +2,8 @@
 
 use clap::{CommandFactory, Parser};
 use protocore_cli::commands::{
-    Cli, Commands,
-    keys::KeysCommands,
-    query::QueryCommands,
-    integrity::IntegrityCommands,
-    integrity::AttestationCommands,
-    upgrade::UpgradeCommands,
+    integrity::AttestationCommands, integrity::IntegrityCommands, keys::KeysCommands,
+    query::QueryCommands, upgrade::UpgradeCommands, Cli, Commands,
 };
 use protocore_cli::OutputFormat;
 
@@ -31,13 +27,19 @@ fn test_parse_start() {
 #[test]
 fn test_parse_keys_generate() {
     let cli = Cli::parse_from(["protocore", "keys", "generate", "--key-type", "wallet"]);
-    assert!(matches!(cli.command, Commands::Keys(KeysCommands::Generate { .. })));
+    assert!(matches!(
+        cli.command,
+        Commands::Keys(KeysCommands::Generate { .. })
+    ));
 }
 
 #[test]
 fn test_parse_query_block() {
     let cli = Cli::parse_from(["protocore", "query", "block", "100"]);
-    assert!(matches!(cli.command, Commands::Query(QueryCommands::Block { .. })));
+    assert!(matches!(
+        cli.command,
+        Commands::Query(QueryCommands::Block { .. })
+    ));
 }
 
 #[test]
@@ -55,7 +57,10 @@ fn test_verbose_flags() {
 #[test]
 fn test_parse_integrity_verify() {
     let cli = Cli::parse_from(["protocore", "integrity", "verify"]);
-    assert!(matches!(cli.command, Commands::Integrity(IntegrityCommands::Verify(_))));
+    assert!(matches!(
+        cli.command,
+        Commands::Integrity(IntegrityCommands::Verify(_))
+    ));
 }
 
 #[test]
@@ -63,23 +68,31 @@ fn test_parse_integrity_attestation_status() {
     let cli = Cli::parse_from(["protocore", "integrity", "attestation", "status"]);
     assert!(matches!(
         cli.command,
-        Commands::Integrity(IntegrityCommands::Attestation(
-            AttestationCommands::Status(_)
-        ))
+        Commands::Integrity(IntegrityCommands::Attestation(AttestationCommands::Status(
+            _
+        )))
     ));
 }
 
 #[test]
 fn test_parse_upgrade_status() {
     let cli = Cli::parse_from(["protocore", "upgrade", "status"]);
-    assert!(matches!(cli.command, Commands::Upgrade(UpgradeCommands::Status(_))));
+    assert!(matches!(
+        cli.command,
+        Commands::Upgrade(UpgradeCommands::Status(_))
+    ));
 }
 
 #[test]
 fn test_parse_upgrade_vote_yes() {
     let cli = Cli::parse_from([
-        "protocore", "upgrade", "vote", "42",
-        "--yes", "--from", "0x1234"
+        "protocore",
+        "upgrade",
+        "vote",
+        "42",
+        "--yes",
+        "--from",
+        "0x1234",
     ]);
     match cli.command {
         Commands::Upgrade(UpgradeCommands::Vote(args)) => {
@@ -94,8 +107,13 @@ fn test_parse_upgrade_vote_yes() {
 #[test]
 fn test_parse_upgrade_vote_no() {
     let cli = Cli::parse_from([
-        "protocore", "upgrade", "vote", "42",
-        "--no", "--from", "0x1234"
+        "protocore",
+        "upgrade",
+        "vote",
+        "42",
+        "--no",
+        "--from",
+        "0x1234",
     ]);
     match cli.command {
         Commands::Upgrade(UpgradeCommands::Vote(args)) => {

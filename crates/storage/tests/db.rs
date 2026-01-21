@@ -49,8 +49,14 @@ fn test_write_batch() {
 
     db.write_batch(batch).unwrap();
 
-    assert_eq!(db.get(cf::BLOCKS, b"key1").unwrap(), Some(b"value1".to_vec()));
-    assert_eq!(db.get(cf::BLOCKS, b"key2").unwrap(), Some(b"value2".to_vec()));
+    assert_eq!(
+        db.get(cf::BLOCKS, b"key1").unwrap(),
+        Some(b"value1".to_vec())
+    );
+    assert_eq!(
+        db.get(cf::BLOCKS, b"key2").unwrap(),
+        Some(b"value2".to_vec())
+    );
 }
 
 #[test]

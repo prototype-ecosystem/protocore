@@ -71,12 +71,19 @@ pub mod registry;
 
 // Re-export main types at crate root
 pub use behaviour::{ProtocoreBehaviour, ProtocoreBehaviourEvent};
-pub use ddos::{DdosConfig, DdosProtection, DdosStats, RejectionReason, SharedDdosProtection, ViolationType};
-pub use discovery::{DiscoveryConfig, DiscoveryMethod, MultiDiscoveryConfig, MultiMethodDiscovery, PeerDiscovery};
+pub use ddos::{
+    DdosConfig, DdosProtection, DdosStats, RejectionReason, SharedDdosProtection, ViolationType,
+};
+pub use discovery::{
+    DiscoveryConfig, DiscoveryMethod, MultiDiscoveryConfig, MultiMethodDiscovery, PeerDiscovery,
+};
 pub use gossip::{GossipMessage, MessageType, Topics};
-pub use registry::{NetworkConfig as RegistryNetworkConfig, NetworkId, NetworkRegistry, RegistryConfig, RegistryService};
 pub use network::{
     Command, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage, NetworkService, PeerInfo,
+};
+pub use registry::{
+    NetworkConfig as RegistryNetworkConfig, NetworkId, NetworkRegistry, RegistryConfig,
+    RegistryService,
 };
 
 /// Result type alias for network operations

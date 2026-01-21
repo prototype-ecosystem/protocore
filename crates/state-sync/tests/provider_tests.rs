@@ -5,11 +5,11 @@
 use protocore_state_sync::{
     keccak256,
     provider::{
-        SnapshotProviderConfig, StateEntry, StateEntryType, StateIterator, StateReader,
-        StoredSnapshot, ProviderStats,
+        ProviderStats, SnapshotProviderConfig, StateEntry, StateEntryType, StateIterator,
+        StateReader, StoredSnapshot,
     },
     snapshot::{FinalityCertificate, SnapshotMetadata},
-    Hash, DEFAULT_CHUNK_SIZE, DEFAULT_MAX_SNAPSHOTS, DEFAULT_SNAPSHOT_INTERVAL,
+    Hash, DEFAULT_MAX_SNAPSHOTS, DEFAULT_SNAPSHOT_INTERVAL,
 };
 use std::path::PathBuf;
 
@@ -96,14 +96,7 @@ fn test_state_iterator() {
 
 #[tokio::test]
 async fn test_stored_snapshot() {
-    let metadata = SnapshotMetadata::new(
-        100,
-        [1u8; 32],
-        [2u8; 32],
-        1024,
-        vec![[3u8; 32]],
-        1024,
-    );
+    let metadata = SnapshotMetadata::new(100, [1u8; 32], [2u8; 32], 1024, vec![[3u8; 32]], 1024);
 
     let snapshot = StoredSnapshot::new(metadata, None, PathBuf::from("/tmp/test"));
 

@@ -105,7 +105,7 @@ fn test_finality_cert() {
     let cert = FinalityCert::new(
         100,
         H256::keccak256(b"block"),
-        vec![0u8; 96], // Mock BLS signature
+        vec![0u8; 96],                // Mock BLS signature
         vec![0b11111111, 0b00001111], // First 12 validators signed
     );
 
@@ -173,8 +173,8 @@ fn test_transactions_root() {
 
 #[test]
 fn test_block_rlp_roundtrip_with_transactions() {
-    use protocore_types::transaction::{SignedTransaction, Transaction, TxType, Signature};
     use bytes::Bytes;
+    use protocore_types::transaction::{Signature, SignedTransaction, Transaction, TxType};
 
     // Create a transaction
     let tx = Transaction {
@@ -197,7 +197,8 @@ fn test_block_rlp_roundtrip_with_transactions() {
             r: H256::from([1u8; 32]),
             s: H256::from([2u8; 32]),
         },
-    ).expect("Failed to create signed tx");
+    )
+    .expect("Failed to create signed tx");
 
     // Create block with transaction
     let header = BlockHeader::new(
@@ -219,13 +220,16 @@ fn test_block_rlp_roundtrip_with_transactions() {
     assert_eq!(decoded.header, header);
     assert_eq!(decoded.transaction_count(), 1);
     assert_eq!(decoded.transactions[0].transaction.nonce, 0);
-    assert_eq!(decoded.transactions[0].transaction.value, 1_000_000_000_000_000_000);
+    assert_eq!(
+        decoded.transactions[0].transaction.value,
+        1_000_000_000_000_000_000
+    );
 }
 
 #[test]
 fn test_block_rlp_roundtrip_multiple_transactions() {
-    use protocore_types::transaction::{SignedTransaction, Transaction, TxType, Signature};
     use bytes::Bytes;
+    use protocore_types::transaction::{Signature, SignedTransaction, Transaction, TxType};
 
     // Create 5 transactions using the same valid signature pattern as the single-tx test
     let mut transactions = Vec::new();
@@ -252,7 +256,8 @@ fn test_block_rlp_roundtrip_multiple_transactions() {
                 r: H256::from([1u8; 32]),
                 s: H256::from([2u8; 32]),
             },
-        ).expect("Failed to create signed tx");
+        )
+        .expect("Failed to create signed tx");
         transactions.push(signed_tx);
     }
 
@@ -269,7 +274,8 @@ fn test_block_rlp_roundtrip_multiple_transactions() {
 
     // Encode and decode
     let encoded = block.rlp_encode();
-    let decoded = Block::rlp_decode(&encoded).expect("Failed to decode block with multiple transactions");
+    let decoded =
+        Block::rlp_decode(&encoded).expect("Failed to decode block with multiple transactions");
 
     // Verify
     assert_eq!(decoded.header, header);
@@ -277,6 +283,9 @@ fn test_block_rlp_roundtrip_multiple_transactions() {
 
     for i in 0u64..5 {
         assert_eq!(decoded.transactions[i as usize].transaction.nonce, i);
-        assert_eq!(decoded.transactions[i as usize].transaction.value, (i as u128 + 1) * 1_000_000_000_000_000_000);
+        assert_eq!(
+            decoded.transactions[i as usize].transaction.value,
+            (i as u128 + 1) * 1_000_000_000_000_000_000
+        );
     }
 }

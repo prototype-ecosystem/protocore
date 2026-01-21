@@ -3,7 +3,7 @@
 //! These tests verify the timeout configuration, calculation, and scheduling
 //! functionality for the MinBFT consensus protocol.
 
-use protocore_consensus::{Step, TimeoutConfig, TimeoutInfo, TimeoutScheduler};
+use protocore_consensus::{Step, TimeoutConfig, TimeoutScheduler};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -88,7 +88,8 @@ fn test_timeout_config_defaults() {
 
 #[test]
 fn test_timeout_calculation() {
-    let config = TimeoutConfig::default();
+    // Disable jitter for deterministic test results
+    let config = TimeoutConfig::default().with_jitter(0.0);
 
     // Round 0: base only
     assert_eq!(config.propose(0), Duration::from_millis(1000));
@@ -115,7 +116,8 @@ fn test_timeout_max_cap() {
 
 #[test]
 fn test_timeout_for_step() {
-    let config = TimeoutConfig::default();
+    // Disable jitter for deterministic test results
+    let config = TimeoutConfig::default().with_jitter(0.0);
 
     assert_eq!(config.timeout_for(Step::Propose, 0), config.propose(0));
     assert_eq!(config.timeout_for(Step::Prevote, 0), config.prevote(0));

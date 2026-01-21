@@ -494,10 +494,7 @@ async fn main() -> Result<()> {
     // Initialize tracing/logging
     init_tracing(&cli)?;
 
-    info!(
-        version = env!("CARGO_PKG_VERSION"),
-        "Starting Proto Core"
-    );
+    info!(version = env!("CARGO_PKG_VERSION"), "Starting Proto Core");
 
     match cli.command {
         Commands::Start {
@@ -535,7 +532,11 @@ async fn main() -> Result<()> {
         Commands::Staking { command } => handle_staking(command).await,
         Commands::Governance { command } => handle_governance(command).await,
 
-        Commands::Export { output, height, rpc } => handle_export(output, height, rpc).await,
+        Commands::Export {
+            output,
+            height,
+            rpc,
+        } => handle_export(output, height, rpc).await,
         Commands::Import { input, data_dir } => handle_import(input, data_dir).await,
         Commands::Version => handle_version(),
     }
@@ -696,7 +697,10 @@ async fn handle_keys(command: KeysCommands) -> Result<()> {
             output: _,
         } => {
             // TODO: Implement mnemonic import
-            println!("Mnemonic import not yet implemented for key type: {}", key_type);
+            println!(
+                "Mnemonic import not yet implemented for key type: {}",
+                key_type
+            );
             Ok(())
         }
         KeysCommands::List { keystore } => {
@@ -705,7 +709,7 @@ async fn handle_keys(command: KeysCommands) -> Result<()> {
             if path.exists() {
                 for entry in std::fs::read_dir(path)? {
                     let entry = entry?;
-                    if entry.path().extension().map_or(false, |e| e == "key") {
+                    if entry.path().extension().is_some_and(|e| e == "key") {
                         println!("  {}", entry.file_name().to_string_lossy());
                     }
                 }
@@ -720,7 +724,10 @@ async fn handle_keys(command: KeysCommands) -> Result<()> {
                 let keys = validator::ValidatorKeys::load(&key_path)?;
                 println!("Key: {}", name);
                 println!("  Address: 0x{}", hex::encode(keys.address.as_bytes()));
-                println!("  BLS Public Key: {}", hex::encode(keys.bls_public_key.to_bytes()));
+                println!(
+                    "  BLS Public Key: {}",
+                    hex::encode(keys.bls_public_key.to_bytes())
+                );
             } else {
                 println!("Key not found: {}", name);
             }
@@ -799,7 +806,10 @@ async fn handle_tx(command: TxCommands) -> Result<()> {
             value,
             rpc,
         } => {
-            println!("Calling contract {} with data {} (value: {}) via {}", to, data, value, rpc);
+            println!(
+                "Calling contract {} with data {} (value: {}) via {}",
+                to, data, value, rpc
+            );
             println!("  (RPC client not yet implemented)");
             Ok(())
         }
@@ -817,7 +827,10 @@ async fn handle_staking(command: StakingCommands) -> Result<()> {
             bls_pubkey,
             rpc,
         } => {
-            println!("Creating validator with {} stake, {}bp commission", amount, commission);
+            println!(
+                "Creating validator with {} stake, {}bp commission",
+                amount, commission
+            );
             println!("  Key: {}", key);
             println!("  BLS pubkey: {}", bls_pubkey);
             println!("  RPC: {}", rpc);
@@ -830,7 +843,10 @@ async fn handle_staking(command: StakingCommands) -> Result<()> {
             key,
             rpc,
         } => {
-            println!("Delegating {} to {} using key {} via {}", amount, validator, key, rpc);
+            println!(
+                "Delegating {} to {} using key {} via {}",
+                amount, validator, key, rpc
+            );
             println!("  (RPC client not yet implemented)");
             Ok(())
         }
@@ -840,7 +856,10 @@ async fn handle_staking(command: StakingCommands) -> Result<()> {
             key,
             rpc,
         } => {
-            println!("Undelegating {} from {} using key {} via {}", amount, validator, key, rpc);
+            println!(
+                "Undelegating {} from {} using key {} via {}",
+                amount, validator, key, rpc
+            );
             println!("  (RPC client not yet implemented)");
             Ok(())
         }
@@ -883,7 +902,10 @@ async fn handle_governance(command: GovernanceCommands) -> Result<()> {
             key,
             rpc,
         } => {
-            println!("Voting {} on proposal {} using key {} via {}", vote, proposal_id, key, rpc);
+            println!(
+                "Voting {} on proposal {} using key {} via {}",
+                vote, proposal_id, key, rpc
+            );
             println!("  (RPC client not yet implemented)");
             Ok(())
         }
@@ -924,6 +946,9 @@ fn handle_version() -> Result<()> {
     println!("Proto Core {}", env!("CARGO_PKG_VERSION"));
     println!("  Rust: {}", env!("CARGO_PKG_RUST_VERSION"));
     println!("  Git: {}", option_env!("GIT_HASH").unwrap_or("unknown"));
-    println!("  Build: {}", option_env!("BUILD_DATE").unwrap_or("unknown"));
+    println!(
+        "  Build: {}",
+        option_env!("BUILD_DATE").unwrap_or("unknown")
+    );
     Ok(())
 }

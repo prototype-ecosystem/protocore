@@ -8,7 +8,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::utils::{CliError, CliResult, OutputFormat, print_info, print_success, print_warning};
+use crate::utils::{print_info, print_success, print_warning, CliError, CliResult, OutputFormat};
 use crate::{DEFAULT_CONFIG_FILE, DEFAULT_KEYSTORE_DIR};
 
 /// Arguments for the init command
@@ -53,11 +53,16 @@ pub struct InitArgs {
 
 /// Execute the init command
 pub async fn execute(args: InitArgs, output_format: OutputFormat) -> CliResult<()> {
-    let data_dir = args.data_dir.as_ref()
+    let data_dir = args
+        .data_dir
+        .as_ref()
         .map(PathBuf::from)
         .unwrap_or_else(crate::default_data_dir);
 
-    print_info(&format!("Initializing Proto Core node at: {}", data_dir.display()));
+    print_info(&format!(
+        "Initializing Proto Core node at: {}",
+        data_dir.display()
+    ));
 
     // Check if directory already exists and has config
     let config_path = data_dir.join(DEFAULT_CONFIG_FILE);
@@ -127,9 +132,15 @@ pub async fn execute(args: InitArgs, output_format: OutputFormat) -> CliResult<(
             println!();
             println!("Next steps:");
             println!("  1. Review configuration: {}", result.config_file);
-            println!("  2. Start the node:       protocore start --config {}", result.config_file);
+            println!(
+                "  2. Start the node:       protocore start --config {}",
+                result.config_file
+            );
             if result.validator_key.is_some() {
-                println!("  3. For validator mode:   protocore start --config {} --validator", result.config_file);
+                println!(
+                    "  3. For validator mode:   protocore start --config {} --validator",
+                    result.config_file
+                );
             }
         }
     }
@@ -183,7 +194,7 @@ fn generate_node_key(path: &Path) -> CliResult<NodeKeyInfo> {
         fs::set_permissions(path, perms)?;
     }
 
-    let node_id = format!("0x{}", hex::encode(&address));
+    let node_id = format!("0x{}", hex::encode(address));
     let public_key_hex = format!("0x{}", hex::encode(public_key.to_compressed()));
 
     print_info(&format!("Generated node key: {}", path.display()));
@@ -197,8 +208,8 @@ fn generate_node_key(path: &Path) -> CliResult<NodeKeyInfo> {
 
 /// Generate validator identity key (includes BLS key)
 fn generate_validator_key(path: &Path) -> CliResult<ValidatorKeyInfo> {
-    use protocore_crypto::ecdsa::PrivateKey;
     use protocore_crypto::bls::BlsPrivateKey;
+    use protocore_crypto::ecdsa::PrivateKey;
 
     // Generate ECDSA key for transactions
     let ecdsa_key = PrivateKey::random();
@@ -228,7 +239,7 @@ fn generate_validator_key(path: &Path) -> CliResult<ValidatorKeyInfo> {
         fs::set_permissions(path, perms)?;
     }
 
-    let address_hex = format!("0x{}", hex::encode(&address));
+    let address_hex = format!("0x{}", hex::encode(address));
     let bls_public_hex = format!("0x{}", hex::encode(bls_public.to_bytes()));
 
     print_info(&format!("Generated validator key: {}", path.display()));
@@ -495,4 +506,3 @@ struct ValidatorKeyFile {
     ecdsa_private_key: String,
     bls_private_key: String,
 }
-

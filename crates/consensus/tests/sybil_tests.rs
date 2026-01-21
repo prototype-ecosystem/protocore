@@ -32,7 +32,10 @@ fn test_confidence_level_from_score() {
     assert_eq!(ConfidenceLevel::from_score(4.5), ConfidenceLevel::High);
     assert_eq!(ConfidenceLevel::from_score(4.99), ConfidenceLevel::High);
     assert_eq!(ConfidenceLevel::from_score(5.0), ConfidenceLevel::Confirmed);
-    assert_eq!(ConfidenceLevel::from_score(10.0), ConfidenceLevel::Confirmed);
+    assert_eq!(
+        ConfidenceLevel::from_score(10.0),
+        ConfidenceLevel::Confirmed
+    );
 }
 
 #[test]
@@ -241,7 +244,10 @@ fn test_appeal_flow() {
     let status = detector.get_status(&validator, after_grace);
     assert_eq!(status.penalty, 0.0);
     assert!(status.appeal_status.is_some());
-    assert_eq!(status.appeal_status.as_ref().unwrap().status, AppealState::Pending);
+    assert_eq!(
+        status.appeal_status.as_ref().unwrap().status,
+        AppealState::Pending
+    );
 
     // Appeal approved
     let review_time = after_grace + 1000;
@@ -249,7 +255,10 @@ fn test_appeal_flow() {
 
     let status = detector.get_status(&validator, review_time);
     assert_eq!(status.penalty, 0.0);
-    assert_eq!(status.appeal_status.as_ref().unwrap().status, AppealState::Approved);
+    assert_eq!(
+        status.appeal_status.as_ref().unwrap().status,
+        AppealState::Approved
+    );
 
     // Clear signals after approval
     detector.clear_signals(&validator);
@@ -281,7 +290,10 @@ fn test_appeal_denied() {
 
     // Penalty now applies
     let status = detector.get_status(&validator, after_grace);
-    assert_eq!(status.appeal_status.as_ref().unwrap().status, AppealState::Denied);
+    assert_eq!(
+        status.appeal_status.as_ref().unwrap().status,
+        AppealState::Denied
+    );
     assert_eq!(status.penalty, 0.80); // Medium confidence
 }
 

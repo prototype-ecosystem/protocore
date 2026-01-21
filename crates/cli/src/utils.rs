@@ -141,15 +141,15 @@ pub fn parse_amount(s: &str) -> CliResult<u128> {
     // Check for suffix
     let (num_part, multiplier) = if s.ends_with("eth") || s.ends_with("mct") {
         // Parse as whole tokens, multiply by 10^18
-        (&s[..s.len()-3], 1_000_000_000_000_000_000u128)
+        (&s[..s.len() - 3], 1_000_000_000_000_000_000u128)
     } else if s.ends_with('k') {
-        (&s[..s.len()-1], 1_000u128)
+        (&s[..s.len() - 1], 1_000u128)
     } else if s.ends_with('m') {
-        (&s[..s.len()-1], 1_000_000u128)
+        (&s[..s.len() - 1], 1_000_000u128)
     } else if s.ends_with('b') {
-        (&s[..s.len()-1], 1_000_000_000u128)
+        (&s[..s.len() - 1], 1_000_000_000u128)
     } else if s.ends_with('t') {
-        (&s[..s.len()-1], 1_000_000_000_000u128)
+        (&s[..s.len() - 1], 1_000_000_000_000u128)
     } else {
         (s.as_str(), 1u128)
     };
@@ -158,16 +158,21 @@ pub fn parse_amount(s: &str) -> CliResult<u128> {
     if num_part.contains('.') {
         let parts: Vec<&str> = num_part.split('.').collect();
         if parts.len() != 2 {
-            return Err(CliError::InvalidArgument(format!("Invalid amount format: {}", s)));
+            return Err(CliError::InvalidArgument(format!(
+                "Invalid amount format: {}",
+                s
+            )));
         }
 
-        let whole: u128 = parts[0].parse()
+        let whole: u128 = parts[0]
+            .parse()
             .map_err(|_| CliError::InvalidArgument(format!("Invalid amount: {}", s)))?;
 
         let decimals = parts[1];
         let decimal_places = decimals.len();
 
-        let frac: u128 = decimals.parse()
+        let frac: u128 = decimals
+            .parse()
             .map_err(|_| CliError::InvalidArgument(format!("Invalid amount: {}", s)))?;
 
         // Calculate the fractional part relative to multiplier
@@ -176,7 +181,8 @@ pub fn parse_amount(s: &str) -> CliResult<u128> {
 
         Ok(whole * multiplier + frac_value)
     } else {
-        let value: u128 = num_part.parse()
+        let value: u128 = num_part
+            .parse()
             .map_err(|_| CliError::InvalidArgument(format!("Invalid amount: {}", s)))?;
         Ok(value * multiplier)
     }
@@ -307,12 +313,16 @@ impl RpcClient {
         Ok(crate::commands::query::BlockInfo {
             number: 12345,
             hash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
-            parent_hash: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890".to_string(),
+            parent_hash: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+                .to_string(),
             timestamp: chrono::Utc::now().timestamp() as u64,
             proposer: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1".to_string(),
-            state_root: "0x0000000000000000000000000000000000000000000000000000000000000000".to_string(),
-            transactions_root: "0x0000000000000000000000000000000000000000000000000000000000000000".to_string(),
-            receipts_root: "0x0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            state_root: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            transactions_root: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            receipts_root: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
             gas_limit: 30_000_000,
             gas_used: 15_000_000,
             transactions: vec![],
@@ -320,7 +330,10 @@ impl RpcClient {
     }
 
     /// Get transaction by hash
-    pub async fn get_transaction(&self, hash: &str) -> CliResult<crate::commands::query::TransactionInfo> {
+    pub async fn get_transaction(
+        &self,
+        hash: &str,
+    ) -> CliResult<crate::commands::query::TransactionInfo> {
         Ok(crate::commands::query::TransactionInfo {
             hash: hash.to_string(),
             status: true,
@@ -338,29 +351,36 @@ impl RpcClient {
     }
 
     /// Get account information
-    pub async fn get_account(&self, address: &str, block: &str) -> CliResult<crate::commands::query::AccountInfo> {
+    pub async fn get_account(
+        &self,
+        address: &str,
+        block: &str,
+    ) -> CliResult<crate::commands::query::AccountInfo> {
         Ok(crate::commands::query::AccountInfo {
             balance: "1000000000000000000000".to_string(),
             nonce: 5,
-            code_hash: "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470".to_string(),
-            storage_root: "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421".to_string(),
+            code_hash: "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+                .to_string(),
+            storage_root: "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
+                .to_string(),
             is_contract: false,
             code_size: 0,
         })
     }
 
     /// Get validators
-    pub async fn get_validators(&self, active_only: bool) -> CliResult<Vec<crate::commands::query::ValidatorInfo>> {
-        Ok(vec![
-            crate::commands::query::ValidatorInfo {
-                address: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1".to_string(),
-                bls_public_key: "0xabcdef...".to_string(),
-                stake: 100_000_000_000_000_000_000_000u128,
-                commission_rate: 1000,
-                active: true,
-                jailed: false,
-            },
-        ])
+    pub async fn get_validators(
+        &self,
+        active_only: bool,
+    ) -> CliResult<Vec<crate::commands::query::ValidatorInfo>> {
+        Ok(vec![crate::commands::query::ValidatorInfo {
+            address: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1".to_string(),
+            bls_public_key: "0xabcdef...".to_string(),
+            stake: 100_000_000_000_000_000_000_000u128,
+            commission_rate: 1000,
+            active: true,
+            jailed: false,
+        }])
     }
 
     /// Get chain status
@@ -393,7 +413,10 @@ impl RpcClient {
     }
 
     /// Get transaction receipt
-    pub async fn get_receipt(&self, hash: &str) -> CliResult<crate::commands::query::TransactionReceipt> {
+    pub async fn get_receipt(
+        &self,
+        hash: &str,
+    ) -> CliResult<crate::commands::query::TransactionReceipt> {
         Ok(crate::commands::query::TransactionReceipt {
             transaction_hash: hash.to_string(),
             status: true,
@@ -410,7 +433,11 @@ impl RpcClient {
     }
 
     /// Get contract code
-    pub async fn get_code(&self, address: &str, block: &str) -> CliResult<crate::commands::query::CodeResponse> {
+    pub async fn get_code(
+        &self,
+        address: &str,
+        block: &str,
+    ) -> CliResult<crate::commands::query::CodeResponse> {
         Ok(crate::commands::query::CodeResponse {
             code: "0x".to_string(),
             size: 0,
@@ -434,7 +461,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     /// Send unstake transaction
@@ -445,7 +472,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     /// Send delegate transaction
@@ -457,7 +484,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     /// Send undelegate transaction
@@ -469,7 +496,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     /// Send redelegate transaction
@@ -482,7 +509,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     /// Send withdraw transaction
@@ -493,11 +520,14 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     /// Get rewards
-    pub async fn get_rewards(&self, address: &str) -> CliResult<crate::commands::staking::RewardsResponse> {
+    pub async fn get_rewards(
+        &self,
+        address: &str,
+    ) -> CliResult<crate::commands::staking::RewardsResponse> {
         Ok(crate::commands::staking::RewardsResponse {
             total: 1_000_000_000_000_000_000u128,
             by_validator: vec![],
@@ -505,7 +535,10 @@ impl RpcClient {
     }
 
     /// Get delegations
-    pub async fn get_delegations(&self, address: &str) -> CliResult<crate::commands::staking::DelegationsResponse> {
+    pub async fn get_delegations(
+        &self,
+        address: &str,
+    ) -> CliResult<crate::commands::staking::DelegationsResponse> {
         Ok(crate::commands::staking::DelegationsResponse {
             total_delegated: 0,
             total_unbonding: 0,
@@ -522,7 +555,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     /// Send update validator transaction
@@ -533,7 +566,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     /// Send unjail transaction
@@ -543,7 +576,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     // -------------------------------------------------------------------------
@@ -551,7 +584,10 @@ impl RpcClient {
     // -------------------------------------------------------------------------
 
     /// Get proposal
-    pub async fn get_proposal(&self, id: u64) -> CliResult<crate::commands::governance::ProposalInfo> {
+    pub async fn get_proposal(
+        &self,
+        id: u64,
+    ) -> CliResult<crate::commands::governance::ProposalInfo> {
         Ok(crate::commands::governance::ProposalInfo {
             id,
             proposal_type: "Text".to_string(),
@@ -589,12 +625,17 @@ impl RpcClient {
     }
 
     /// Get proposal votes
-    pub async fn get_proposal_votes(&self, id: u64) -> CliResult<Vec<crate::commands::governance::VoteEntry>> {
+    pub async fn get_proposal_votes(
+        &self,
+        id: u64,
+    ) -> CliResult<Vec<crate::commands::governance::VoteEntry>> {
         Ok(vec![])
     }
 
     /// Get governance params
-    pub async fn get_governance_params(&self) -> CliResult<crate::commands::governance::GovernanceParams> {
+    pub async fn get_governance_params(
+        &self,
+    ) -> CliResult<crate::commands::governance::GovernanceParams> {
         Ok(crate::commands::governance::GovernanceParams {
             min_deposit: 10_000_000_000_000_000_000_000u128,
             deposit_period_blocks: 17280,
@@ -625,7 +666,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<(String, u64)> {
-        Ok((format!("0x{}", hex::encode(&[0u8; 32])), 1))
+        Ok((format!("0x{}", hex::encode([0u8; 32])), 1))
     }
 
     /// Send vote transaction
@@ -637,7 +678,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     /// Send deposit transaction
@@ -649,7 +690,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     // -------------------------------------------------------------------------
@@ -688,7 +729,9 @@ impl RpcClient {
     }
 
     /// Get attestation status
-    pub async fn get_attestation_status(&self) -> CliResult<crate::commands::integrity::AttestationStatus> {
+    pub async fn get_attestation_status(
+        &self,
+    ) -> CliResult<crate::commands::integrity::AttestationStatus> {
         // Placeholder implementation
         Ok(crate::commands::integrity::AttestationStatus {
             last_attestation_time: chrono::Utc::now().timestamp() as u64 - 3600, // 1 hour ago
@@ -719,7 +762,8 @@ impl RpcClient {
                 no_votes: 22,
                 total_validators: 100,
                 your_vote: Some("yes".to_string()),
-                binary_hash: "a7f3c2b1e9d8f4a2b6c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5".to_string(),
+                binary_hash: "a7f3c2b1e9d8f4a2b6c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5"
+                    .to_string(),
                 changelog: vec![
                     "Improved consensus performance".to_string(),
                     "Added new RPC methods".to_string(),
@@ -745,7 +789,7 @@ impl RpcClient {
         gas: u64,
         gas_price: Option<u64>,
     ) -> CliResult<String> {
-        Ok(format!("0x{}", hex::encode(&[0u8; 32])))
+        Ok(format!("0x{}", hex::encode([0u8; 32])))
     }
 
     /// Get upgrade history
@@ -800,15 +844,23 @@ impl TransactionSigner {
 
         // Get private key (handle both encrypted and unencrypted)
         let private_key = if let Some(pk) = key_data["private_key"].as_str() {
-            hex::decode(pk).map_err(|e| CliError::KeyError(format!("Invalid private key: {}", e)))?
+            hex::decode(pk)
+                .map_err(|e| CliError::KeyError(format!("Invalid private key: {}", e)))?
         } else if key_data["crypto"].is_object() {
             // TODO: Prompt for password and decrypt
-            return Err(CliError::NotImplemented("Encrypted key decryption".to_string()));
+            return Err(CliError::NotImplemented(
+                "Encrypted key decryption".to_string(),
+            ));
         } else {
-            return Err(CliError::KeyError("No private key found in key file".to_string()));
+            return Err(CliError::KeyError(
+                "No private key found in key file".to_string(),
+            ));
         };
 
-        Ok(Self { address, private_key })
+        Ok(Self {
+            address,
+            private_key,
+        })
     }
 
     /// Get the address of this signer
@@ -821,13 +873,16 @@ impl TransactionSigner {
         use protocore_crypto::ecdsa::PrivateKey;
 
         // Convert Vec<u8> to fixed-size array
-        let key_array: [u8; 32] = self.private_key.as_slice().try_into()
-            .map_err(|_| CliError::KeyError("Private key must be exactly 32 bytes".to_string()))?;
+        let key_array: [u8; 32] =
+            self.private_key.as_slice().try_into().map_err(|_| {
+                CliError::KeyError("Private key must be exactly 32 bytes".to_string())
+            })?;
 
         let private_key = PrivateKey::from_bytes(&key_array)
             .map_err(|e| CliError::KeyError(format!("Invalid private key: {}", e)))?;
 
-        let signature = private_key.sign_message(message)
+        let signature = private_key
+            .sign_message(message)
             .map_err(|e| CliError::KeyError(format!("Signing failed: {}", e)))?;
 
         Ok(signature.to_bytes().to_vec())
@@ -837,7 +892,9 @@ impl TransactionSigner {
 /// Find a key file by address or name
 fn find_key_file(keystore_dir: &Path, identifier: &str) -> CliResult<PathBuf> {
     if !keystore_dir.exists() {
-        return Err(CliError::FileNotFound(keystore_dir.to_string_lossy().to_string()));
+        return Err(CliError::FileNotFound(
+            keystore_dir.to_string_lossy().to_string(),
+        ));
     }
 
     let id_lower = identifier.to_lowercase();
@@ -846,7 +903,7 @@ fn find_key_file(keystore_dir: &Path, identifier: &str) -> CliResult<PathBuf> {
         let entry = entry?;
         let path = entry.path();
 
-        if path.extension().map_or(false, |ext| ext == "json") {
+        if path.extension().is_some_and(|ext| ext == "json") {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(key_data) = serde_json::from_str::<serde_json::Value>(&content) {
                     let address = key_data["address"].as_str().unwrap_or("");
@@ -876,7 +933,7 @@ pub fn create_spinner(message: &str) -> indicatif::ProgressBar {
     spinner.set_style(
         indicatif::ProgressStyle::default_spinner()
             .template("{spinner:.green} {msg}")
-            .unwrap()
+            .unwrap(),
     );
     spinner.set_message(message.to_string());
     spinner.enable_steady_tick(Duration::from_millis(100));
@@ -890,9 +947,8 @@ pub fn create_progress_bar(total: u64, message: &str) -> indicatif::ProgressBar 
         indicatif::ProgressStyle::default_bar()
             .template("{msg} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
             .unwrap()
-            .progress_chars("##-")
+            .progress_chars("##-"),
     );
     bar.set_message(message.to_string());
     bar
 }
-

@@ -114,9 +114,9 @@ impl MethodCosts {
             "eth_getLogs" => self.eth_get_logs,
             "eth_getBlockByNumber" | "eth_getBlockByHash" => self.eth_get_block_full,
             "eth_sendRawTransaction" | "eth_sendTransaction" => self.eth_send_transaction,
-            "eth_blockNumber" | "eth_chainId" | "eth_gasPrice" | "eth_syncing"
-            | "eth_accounts" | "net_version" | "net_listening" | "net_peerCount"
-            | "web3_clientVersion" | "web3_sha3" => self.simple_read,
+            "eth_blockNumber" | "eth_chainId" | "eth_gasPrice" | "eth_syncing" | "eth_accounts"
+            | "net_version" | "net_listening" | "net_peerCount" | "web3_clientVersion"
+            | "web3_sha3" => self.simple_read,
             "eth_subscribe" | "eth_unsubscribe" => self.subscription,
             s if s.starts_with("debug_") || s.starts_with("trace_") => self.debug_trace,
             _ => self.eth_get_block_simple, // Default moderate cost
@@ -356,8 +356,14 @@ impl RpcDdosProtection {
             .unwrap_or(ApiTier::Public);
 
         // Calculate limits based on tier
-        let max_requests = self.config.max_requests_per_ip.saturating_mul(tier.rate_multiplier());
-        let max_budget = self.config.cost_budget_per_ip.saturating_mul(tier.budget_multiplier());
+        let max_requests = self
+            .config
+            .max_requests_per_ip
+            .saturating_mul(tier.rate_multiplier());
+        let max_budget = self
+            .config
+            .cost_budget_per_ip
+            .saturating_mul(tier.budget_multiplier());
 
         // Get request cost
         let cost = self.config.method_costs.cost_for_method(method);
@@ -381,7 +387,10 @@ impl RpcDdosProtection {
             state.window_start = now;
         }
 
-        let reset_in = self.config.window_duration.saturating_sub(now.duration_since(state.window_start));
+        let reset_in = self
+            .config
+            .window_duration
+            .saturating_sub(now.duration_since(state.window_start));
 
         // Check request count limit
         if state.request_count >= max_requests {
@@ -647,8 +656,16 @@ mod tests {
         let ip = test_ip();
 
         // First 3 should succeed
-        assert!(protection.check_request(ip, "eth_blockNumber", None).allowed);
-        assert!(protection.check_request(ip, "eth_blockNumber", None).allowed);
+        assert!(
+            protection
+                .check_request(ip, "eth_blockNumber", None)
+                .allowed
+        );
+        assert!(
+            protection
+                .check_request(ip, "eth_blockNumber", None)
+                .allowed
+        );
         let result = protection.check_request(ip, "eth_blockNumber", None);
         assert!(result.allowed);
         assert_eq!(result.remaining_requests, 0);
@@ -680,7 +697,10 @@ mod tests {
         // Third should fail due to budget
         let result = protection.check_request(ip, "eth_call", None);
         assert!(!result.allowed);
-        assert_eq!(result.reject_reason, Some(RpcRejectReason::CostBudgetExceeded));
+        assert_eq!(
+            result.reject_reason,
+            Some(RpcRejectReason::CostBudgetExceeded)
+        );
     }
 
     #[test]
@@ -697,14 +717,26 @@ mod tests {
 
         // Without key: 3 requests max
         for _ in 0..3 {
-            assert!(protection.check_request(ip, "eth_blockNumber", None).allowed);
+            assert!(
+                protection
+                    .check_request(ip, "eth_blockNumber", None)
+                    .allowed
+            );
         }
-        assert!(!protection.check_request(ip, "eth_blockNumber", None).allowed);
+        assert!(
+            !protection
+                .check_request(ip, "eth_blockNumber", None)
+                .allowed
+        );
 
         // Different IP with premium key: 60 requests max (3 * 20)
         let ip2 = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2));
         for _ in 0..60 {
-            assert!(protection.check_request(ip2, "eth_blockNumber", Some("premium_key")).allowed);
+            assert!(
+                protection
+                    .check_request(ip2, "eth_blockNumber", Some("premium_key"))
+                    .allowed
+            );
         }
         let result = protection.check_request(ip2, "eth_blockNumber", Some("premium_key"));
         assert!(!result.allowed);
@@ -723,7 +755,11 @@ mod tests {
 
         // Initially closed
         assert_eq!(protection.circuit_state(), CircuitState::Closed);
-        assert!(protection.check_request(ip, "eth_blockNumber", None).allowed);
+        assert!(
+            protection
+                .check_request(ip, "eth_blockNumber", None)
+                .allowed
+        );
 
         // Record errors to trip breaker
         protection.record_error();
@@ -740,7 +776,11 @@ mod tests {
         std::thread::sleep(Duration::from_millis(150));
 
         // Should transition to half-open and allow request
-        assert!(protection.check_request(ip, "eth_blockNumber", None).allowed);
+        assert!(
+            protection
+                .check_request(ip, "eth_blockNumber", None)
+                .allowed
+        );
         assert_eq!(protection.circuit_state(), CircuitState::HalfOpen);
 
         // Successful request should close the circuit
@@ -760,11 +800,23 @@ mod tests {
         let ip = test_ip();
 
         // First request succeeds
-        assert!(protection.check_request(ip, "eth_blockNumber", None).allowed);
+        assert!(
+            protection
+                .check_request(ip, "eth_blockNumber", None)
+                .allowed
+        );
 
         // Next requests cause violations
-        assert!(!protection.check_request(ip, "eth_blockNumber", None).allowed);
-        assert!(!protection.check_request(ip, "eth_blockNumber", None).allowed);
+        assert!(
+            !protection
+                .check_request(ip, "eth_blockNumber", None)
+                .allowed
+        );
+        assert!(
+            !protection
+                .check_request(ip, "eth_blockNumber", None)
+                .allowed
+        );
 
         // Should now be banned
         assert!(protection.is_ip_banned(&ip));
@@ -775,7 +827,11 @@ mod tests {
         // Unban
         protection.unban_ip(&ip);
         assert!(!protection.is_ip_banned(&ip));
-        assert!(protection.check_request(ip, "eth_blockNumber", None).allowed);
+        assert!(
+            protection
+                .check_request(ip, "eth_blockNumber", None)
+                .allowed
+        );
     }
 
     #[test]
@@ -790,7 +846,11 @@ mod tests {
 
         // Localhost should always be allowed
         for _ in 0..100 {
-            assert!(protection.check_request(localhost, "eth_blockNumber", None).allowed);
+            assert!(
+                protection
+                    .check_request(localhost, "eth_blockNumber", None)
+                    .allowed
+            );
         }
     }
 }

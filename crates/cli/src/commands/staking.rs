@@ -11,11 +11,11 @@ use clap::{Parser, Subcommand};
 use dialoguer::Confirm;
 use std::path::PathBuf;
 
-use crate::utils::{
-    format_balance, parse_amount, CliError, CliResult, OutputFormat, RpcClient, TransactionSigner,
-    print_info, print_success, print_warning, print_error,
-};
 use crate::default_keystore_dir;
+use crate::utils::{
+    format_balance, parse_amount, print_info, print_success, print_warning, CliError, CliResult,
+    OutputFormat, RpcClient, TransactionSigner,
+};
 
 /// Staking subcommands
 #[derive(Subcommand, Debug)]
@@ -418,8 +418,12 @@ pub async fn execute(cmd: StakingCommands, output_format: OutputFormat) -> CliRe
         StakingCommands::Withdraw(args) => execute_withdraw(args, output_format).await,
         StakingCommands::Rewards(args) => execute_rewards(args, output_format).await,
         StakingCommands::Delegations(args) => execute_delegations(args, output_format).await,
-        StakingCommands::CreateValidator(args) => execute_create_validator(args, output_format).await,
-        StakingCommands::UpdateValidator(args) => execute_update_validator(args, output_format).await,
+        StakingCommands::CreateValidator(args) => {
+            execute_create_validator(args, output_format).await
+        }
+        StakingCommands::UpdateValidator(args) => {
+            execute_update_validator(args, output_format).await
+        }
         StakingCommands::Unjail(args) => execute_unjail(args, output_format).await,
     }
 }
@@ -429,7 +433,10 @@ async fn execute_stake(args: StakeArgs, output_format: OutputFormat) -> CliResul
     let amount = parse_amount(&args.amount)?;
     let client = RpcClient::new(&args.rpc)?;
 
-    print_info(&format!("Staking {} tokens...", format_balance(&amount.to_string())));
+    print_info(&format!(
+        "Staking {} tokens...",
+        format_balance(&amount.to_string())
+    ));
 
     // Confirm transaction
     if !args.yes {
@@ -452,16 +459,16 @@ async fn execute_stake(args: StakeArgs, output_format: OutputFormat) -> CliResul
     }
 
     // Load key and sign transaction
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
     // Build and send transaction
-    let tx_hash = client.send_stake_transaction(
-        &signer,
-        amount,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_stake_transaction(&signer, amount, args.gas, args.gas_price)
+        .await?;
 
     output_transaction_result(&tx_hash, "Stake", output_format)?;
     Ok(())
@@ -472,8 +479,13 @@ async fn execute_unstake(args: UnstakeArgs, output_format: OutputFormat) -> CliR
     let amount = parse_amount(&args.amount)?;
     let client = RpcClient::new(&args.rpc)?;
 
-    print_info(&format!("Unstaking {} tokens...", format_balance(&amount.to_string())));
-    print_warning("Unstaked tokens will be available after the unbonding period (typically 21 days).");
+    print_info(&format!(
+        "Unstaking {} tokens...",
+        format_balance(&amount.to_string())
+    ));
+    print_warning(
+        "Unstaked tokens will be available after the unbonding period (typically 21 days).",
+    );
 
     // Confirm transaction
     if !args.yes {
@@ -494,15 +506,15 @@ async fn execute_unstake(args: UnstakeArgs, output_format: OutputFormat) -> CliR
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
-    let tx_hash = client.send_unstake_transaction(
-        &signer,
-        amount,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_unstake_transaction(&signer, amount, args.gas, args.gas_price)
+        .await?;
 
     output_transaction_result(&tx_hash, "Unstake", output_format)?;
     Ok(())
@@ -513,7 +525,8 @@ async fn execute_delegate(args: DelegateArgs, output_format: OutputFormat) -> Cl
     let amount = parse_amount(&args.amount)?;
     let client = RpcClient::new(&args.rpc)?;
 
-    print_info(&format!("Delegating {} tokens to validator {}...",
+    print_info(&format!(
+        "Delegating {} tokens to validator {}...",
         format_balance(&amount.to_string()),
         &args.validator[..10]
     ));
@@ -538,16 +551,15 @@ async fn execute_delegate(args: DelegateArgs, output_format: OutputFormat) -> Cl
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
-    let tx_hash = client.send_delegate_transaction(
-        &signer,
-        &args.validator,
-        amount,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_delegate_transaction(&signer, &args.validator, amount, args.gas, args.gas_price)
+        .await?;
 
     output_transaction_result(&tx_hash, "Delegation", output_format)?;
     Ok(())
@@ -558,7 +570,8 @@ async fn execute_undelegate(args: UndelegateArgs, output_format: OutputFormat) -
     let amount = parse_amount(&args.amount)?;
     let client = RpcClient::new(&args.rpc)?;
 
-    print_info(&format!("Undelegating {} tokens from validator {}...",
+    print_info(&format!(
+        "Undelegating {} tokens from validator {}...",
         format_balance(&amount.to_string()),
         &args.validator[..10]
     ));
@@ -583,16 +596,15 @@ async fn execute_undelegate(args: UndelegateArgs, output_format: OutputFormat) -
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
-    let tx_hash = client.send_undelegate_transaction(
-        &signer,
-        &args.validator,
-        amount,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_undelegate_transaction(&signer, &args.validator, amount, args.gas, args.gas_price)
+        .await?;
 
     output_transaction_result(&tx_hash, "Undelegation", output_format)?;
     Ok(())
@@ -603,7 +615,8 @@ async fn execute_redelegate(args: RedelegateArgs, output_format: OutputFormat) -
     let amount = parse_amount(&args.amount)?;
     let client = RpcClient::new(&args.rpc)?;
 
-    print_info(&format!("Redelegating {} tokens from {} to {}...",
+    print_info(&format!(
+        "Redelegating {} tokens from {} to {}...",
         format_balance(&amount.to_string()),
         &args.from_validator[..10],
         &args.to_validator[..10]
@@ -629,17 +642,22 @@ async fn execute_redelegate(args: RedelegateArgs, output_format: OutputFormat) -
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
-    let tx_hash = client.send_redelegate_transaction(
-        &signer,
-        &args.from_validator,
-        &args.to_validator,
-        amount,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_redelegate_transaction(
+            &signer,
+            &args.from_validator,
+            &args.to_validator,
+            amount,
+            args.gas,
+            args.gas_price,
+        )
+        .await?;
 
     output_transaction_result(&tx_hash, "Redelegation", output_format)?;
     Ok(())
@@ -650,7 +668,10 @@ async fn execute_withdraw(args: WithdrawArgs, output_format: OutputFormat) -> Cl
     let client = RpcClient::new(&args.rpc)?;
 
     if let Some(ref validator) = args.validator {
-        print_info(&format!("Withdrawing rewards from validator {}...", &validator[..10]));
+        print_info(&format!(
+            "Withdrawing rewards from validator {}...",
+            &validator[..10]
+        ));
     } else {
         print_info("Withdrawing all accumulated rewards...");
     }
@@ -660,7 +681,10 @@ async fn execute_withdraw(args: WithdrawArgs, output_format: OutputFormat) -> Cl
         let rewards = client.get_rewards(&args.from).await?;
 
         println!();
-        println!("Pending Rewards: {}", format_balance(&rewards.total.to_string()));
+        println!(
+            "Pending Rewards: {}",
+            format_balance(&rewards.total.to_string())
+        );
         println!();
 
         if !Confirm::new()
@@ -673,15 +697,15 @@ async fn execute_withdraw(args: WithdrawArgs, output_format: OutputFormat) -> Cl
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
-    let tx_hash = client.send_withdraw_transaction(
-        &signer,
-        args.validator.as_deref(),
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_withdraw_transaction(&signer, args.validator.as_deref(), args.gas, args.gas_price)
+        .await?;
 
     output_transaction_result(&tx_hash, "Withdrawal", output_format)?;
     Ok(())
@@ -703,7 +727,10 @@ async fn execute_rewards(args: RewardsArgs, output_format: OutputFormat) -> CliR
             println!("Staking Rewards for {}", args.address);
             println!("===================");
             println!();
-            println!("Total Pending: {}", format_balance(&rewards.total.to_string()));
+            println!(
+                "Total Pending: {}",
+                format_balance(&rewards.total.to_string())
+            );
             println!();
 
             if !rewards.by_validator.is_empty() {
@@ -711,7 +738,8 @@ async fn execute_rewards(args: RewardsArgs, output_format: OutputFormat) -> CliR
                 println!("{:<44} {:<20}", "VALIDATOR", "REWARDS");
                 println!("{}", "-".repeat(66));
                 for (validator, amount) in &rewards.by_validator {
-                    println!("{:<44} {:<20}",
+                    println!(
+                        "{:<44} {:<20}",
                         validator,
                         format_balance(&amount.to_string())
                     );
@@ -727,7 +755,10 @@ async fn execute_rewards(args: RewardsArgs, output_format: OutputFormat) -> CliR
 async fn execute_delegations(args: DelegationsArgs, output_format: OutputFormat) -> CliResult<()> {
     let client = RpcClient::new(&args.rpc)?;
 
-    print_info(&format!("Querying delegations for {}...", &args.address[..10]));
+    print_info(&format!(
+        "Querying delegations for {}...",
+        &args.address[..10]
+    ));
 
     let delegations = client.get_delegations(&args.address).await?;
 
@@ -739,8 +770,14 @@ async fn execute_delegations(args: DelegationsArgs, output_format: OutputFormat)
             println!("Delegations for {}", args.address);
             println!("===============");
             println!();
-            println!("Total Delegated: {}", format_balance(&delegations.total_delegated.to_string()));
-            println!("Total Unbonding: {}", format_balance(&delegations.total_unbonding.to_string()));
+            println!(
+                "Total Delegated: {}",
+                format_balance(&delegations.total_delegated.to_string())
+            );
+            println!(
+                "Total Unbonding: {}",
+                format_balance(&delegations.total_unbonding.to_string())
+            );
             println!();
 
             if !delegations.delegations.is_empty() {
@@ -748,7 +785,8 @@ async fn execute_delegations(args: DelegationsArgs, output_format: OutputFormat)
                 println!("{:<44} {:<20} {:<10}", "VALIDATOR", "AMOUNT", "SHARES");
                 println!("{}", "-".repeat(76));
                 for d in &delegations.delegations {
-                    println!("{:<44} {:<20} {:<10.4}",
+                    println!(
+                        "{:<44} {:<20} {:<10.4}",
                         d.validator,
                         format_balance(&d.amount.to_string()),
                         d.shares
@@ -762,7 +800,8 @@ async fn execute_delegations(args: DelegationsArgs, output_format: OutputFormat)
                 println!("{:<44} {:<20} {:<20}", "VALIDATOR", "AMOUNT", "COMPLETION");
                 println!("{}", "-".repeat(86));
                 for u in &delegations.unbonding {
-                    println!("{:<44} {:<20} {:<20}",
+                    println!(
+                        "{:<44} {:<20} {:<20}",
                         u.validator,
                         format_balance(&u.amount.to_string()),
                         u.completion_time
@@ -776,12 +815,17 @@ async fn execute_delegations(args: DelegationsArgs, output_format: OutputFormat)
 }
 
 /// Execute create-validator command
-async fn execute_create_validator(args: CreateValidatorArgs, output_format: OutputFormat) -> CliResult<()> {
+async fn execute_create_validator(
+    args: CreateValidatorArgs,
+    output_format: OutputFormat,
+) -> CliResult<()> {
     let amount = parse_amount(&args.amount)?;
     let client = RpcClient::new(&args.rpc)?;
 
     if args.commission > 10000 {
-        return Err(CliError::InvalidArgument("Commission cannot exceed 100% (10000 bps)".to_string()));
+        return Err(CliError::InvalidArgument(
+            "Commission cannot exceed 100% (10000 bps)".to_string(),
+        ));
     }
 
     print_info("Creating new validator...");
@@ -791,12 +835,23 @@ async fn execute_create_validator(args: CreateValidatorArgs, output_format: Outp
         println!("Validator Details:");
         println!("  Initial Stake:   {}", format_balance(&amount.to_string()));
         println!("  Commission:      {:.2}%", args.commission as f64 / 100.0);
-        println!("  Max Change/Day:  {:.2}%", args.max_commission_change as f64 / 100.0);
-        println!("  Moniker:         {}", args.moniker.as_deref().unwrap_or("(not set)"));
-        println!("  Website:         {}", args.website.as_deref().unwrap_or("(not set)"));
+        println!(
+            "  Max Change/Day:  {:.2}%",
+            args.max_commission_change as f64 / 100.0
+        );
+        println!(
+            "  Moniker:         {}",
+            args.moniker.as_deref().unwrap_or("(not set)")
+        );
+        println!(
+            "  Website:         {}",
+            args.website.as_deref().unwrap_or("(not set)")
+        );
         println!("  BLS Public Key:  {}...", &args.bls_pubkey[..40]);
         println!();
-        print_warning("Creating a validator requires a minimum stake and proper uptime commitment.");
+        print_warning(
+            "Creating a validator requires a minimum stake and proper uptime commitment.",
+        );
 
         if !Confirm::new()
             .with_prompt("Proceed with validator creation?")
@@ -808,7 +863,10 @@ async fn execute_create_validator(args: CreateValidatorArgs, output_format: Outp
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
     let validator_info = ValidatorCreateInfo {
@@ -821,26 +879,28 @@ async fn execute_create_validator(args: CreateValidatorArgs, output_format: Outp
         bls_public_key: args.bls_pubkey,
     };
 
-    let tx_hash = client.send_create_validator_transaction(
-        &signer,
-        validator_info,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_create_validator_transaction(&signer, validator_info, args.gas, args.gas_price)
+        .await?;
 
     output_transaction_result(&tx_hash, "Validator Creation", output_format)?;
     Ok(())
 }
 
 /// Execute update-validator command
-async fn execute_update_validator(args: UpdateValidatorArgs, output_format: OutputFormat) -> CliResult<()> {
+async fn execute_update_validator(
+    args: UpdateValidatorArgs,
+    output_format: OutputFormat,
+) -> CliResult<()> {
     let client = RpcClient::new(&args.rpc)?;
 
-    if args.commission.is_none() && args.moniker.is_none()
-        && args.website.is_none() && args.details.is_none()
+    if args.commission.is_none()
+        && args.moniker.is_none()
+        && args.website.is_none()
+        && args.details.is_none()
     {
         return Err(CliError::InvalidArgument(
-            "At least one update parameter must be specified".to_string()
+            "At least one update parameter must be specified".to_string(),
         ));
     }
 
@@ -873,7 +933,10 @@ async fn execute_update_validator(args: UpdateValidatorArgs, output_format: Outp
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
     let update_info = ValidatorUpdateInfo {
@@ -883,12 +946,9 @@ async fn execute_update_validator(args: UpdateValidatorArgs, output_format: Outp
         details: args.details,
     };
 
-    let tx_hash = client.send_update_validator_transaction(
-        &signer,
-        update_info,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_update_validator_transaction(&signer, update_info, args.gas, args.gas_price)
+        .await?;
 
     output_transaction_result(&tx_hash, "Validator Update", output_format)?;
     Ok(())
@@ -914,14 +974,15 @@ async fn execute_unjail(args: UnjailArgs, output_format: OutputFormat) -> CliRes
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
-    let tx_hash = client.send_unjail_transaction(
-        &signer,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_unjail_transaction(&signer, args.gas, args.gas_price)
+        .await?;
 
     output_transaction_result(&tx_hash, "Unjail", output_format)?;
     Ok(())
@@ -935,11 +996,14 @@ fn output_transaction_result(
 ) -> CliResult<()> {
     match output_format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "status": "submitted",
-                "action": action,
-                "transaction_hash": tx_hash,
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": "submitted",
+                    "action": action,
+                    "transaction_hash": tx_hash,
+                }))?
+            );
         }
         OutputFormat::Text => {
             print_success(&format!("{} transaction submitted!", action));
@@ -1008,4 +1072,3 @@ pub struct UnbondingEntry {
     pub amount: u128,
     pub completion_time: String,
 }
-

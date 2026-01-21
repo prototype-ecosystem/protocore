@@ -290,7 +290,10 @@ impl MempoolRateLimiter {
         if violations >= BLOCK_THRESHOLD {
             let expiry = Instant::now() + BLOCK_DURATION;
             self.blocked_senders.write().insert(*sender, expiry);
-            warn!(?sender, violations, "sender blocked due to rate limit violations");
+            warn!(
+                ?sender,
+                violations, "sender blocked due to rate limit violations"
+            );
         }
     }
 
@@ -358,9 +361,7 @@ impl MempoolRateLimiter {
         {
             let window = self.config.window_duration;
             let mut states = self.sender_states.write();
-            states.retain(|_, state| {
-                now.duration_since(state.window_start) < window * 2
-            });
+            states.retain(|_, state| now.duration_since(state.window_start) < window * 2);
         }
 
         debug!("mempool rate limiter cleanup completed");

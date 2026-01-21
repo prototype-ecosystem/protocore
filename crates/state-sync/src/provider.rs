@@ -18,7 +18,7 @@
 //! Requests are rate-limited and prioritized to ensure fair resource distribution.
 
 use crate::{
-    chunks::{ChunkId, ChunkProof, ChunkRequest, ChunkResponse, ProofNode, StateChunk},
+    chunks::{ChunkProof, ChunkRequest, ChunkResponse, ProofNode, StateChunk},
     keccak256, keccak256_concat,
     snapshot::{
         FinalityCertificate, SnapshotInfo, SnapshotList, SnapshotListEntry, SnapshotMetadata,
@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Mutex, RwLock, Semaphore};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
 /// Configuration for the snapshot provider
 #[derive(Debug, Clone)]
@@ -348,7 +348,8 @@ impl RateLimiter {
     async fn cleanup(&self) {
         let now = Instant::now();
         let mut per_peer = self.per_peer.write().await;
-        per_peer.retain(|_, state| now.duration_since(state.window_start) < Duration::from_secs(60));
+        per_peer
+            .retain(|_, state| now.duration_since(state.window_start) < Duration::from_secs(60));
     }
 }
 
@@ -524,7 +525,7 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
 
     /// Get an event receiver
     pub async fn take_event_receiver(&self) -> mpsc::Receiver<ProviderEvent> {
-        let mut rx = self.event_rx.lock().await;
+        let rx = self.event_rx.lock().await;
         let (new_tx, new_rx) = mpsc::channel(1000);
         // Note: In production, use a broadcast channel
         new_rx
@@ -553,7 +554,10 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
             let mut stats = self.stats.write().await;
             stats.requests_rate_limited += 1;
 
-            let _ = self.event_tx.send(ProviderEvent::RateLimited { peer }).await;
+            let _ = self
+                .event_tx
+                .send(ProviderEvent::RateLimited { peer })
+                .await;
 
             return SnapshotList::new(vec![], request.request_id, self.state.finalized_height());
         }
@@ -591,11 +595,7 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
     }
 
     /// Handle a chunk request
-    pub async fn handle_chunk_request(
-        &self,
-        peer: PeerId,
-        request: ChunkRequest,
-    ) -> ChunkResponse {
+    pub async fn handle_chunk_request(&self, peer: PeerId, request: ChunkRequest) -> ChunkResponse {
         // Update stats
         {
             let mut stats = self.stats.write().await;
@@ -607,7 +607,10 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
             let mut stats = self.stats.write().await;
             stats.requests_rate_limited += 1;
 
-            let _ = self.event_tx.send(ProviderEvent::RateLimited { peer }).await;
+            let _ = self
+                .event_tx
+                .send(ProviderEvent::RateLimited { peer })
+                .await;
 
             return ChunkResponse::error(request.request_id, "rate limited".to_string());
         }
@@ -750,10 +753,7 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
         let start_time = Instant::now();
 
         // Get block hash and state root
-        let block_hash = self
-            .state
-            .block_hash(height)
-            .ok_or("block not found")?;
+        let block_hash = self.state.block_hash(height).ok_or("block not found")?;
 
         let state_root = self.state.state_root();
 
@@ -761,7 +761,10 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
         let finality_cert = self.state.finality_cert(height);
 
         // Create snapshot directory
-        let snapshot_path = self.config.snapshot_dir.join(format!("snapshot_{}", height));
+        let snapshot_path = self
+            .config
+            .snapshot_dir
+            .join(format!("snapshot_{}", height));
         tokio::fs::create_dir_all(&snapshot_path)
             .await
             .map_err(|e| e.to_string())?;
@@ -860,7 +863,7 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
         // Generate chunks based on key ranges
         // In a real implementation, this would iterate over the actual state trie
         let mut chunk_index = 0u64;
-        let mut current_chunk_data: Vec<u8> = Vec::with_capacity(chunk_size);
+        let current_chunk_data: Vec<u8> = Vec::with_capacity(chunk_size);
 
         // Simulate chunk generation with key ranges
         // In production, this would actually iterate over the state
@@ -1013,7 +1016,10 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
 
     /// Load existing snapshots from disk
     async fn load_snapshots(&self) {
-        info!("Loading existing snapshots from {:?}", self.config.snapshot_dir);
+        info!(
+            "Loading existing snapshots from {:?}",
+            self.config.snapshot_dir
+        );
 
         // Create snapshot directory if it doesn't exist
         if let Err(e) = tokio::fs::create_dir_all(&self.config.snapshot_dir).await {
@@ -1100,7 +1106,10 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
 
     /// Auto-create snapshots at configured intervals
     async fn auto_create_loop(&self) {
-        info!("Starting auto-create loop with interval {} blocks", self.config.snapshot_interval);
+        info!(
+            "Starting auto-create loop with interval {} blocks",
+            self.config.snapshot_interval
+        );
 
         loop {
             // Check shutdown
@@ -1121,8 +1130,8 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
 
             if should_create {
                 // Calculate target height (align to interval)
-                let target_height =
-                    (current_height / self.config.snapshot_interval) * self.config.snapshot_interval;
+                let target_height = (current_height / self.config.snapshot_interval)
+                    * self.config.snapshot_interval;
 
                 if target_height > last_height {
                     info!("Auto-creating snapshot at height {}", target_height);
@@ -1135,7 +1144,10 @@ impl<S: StateReader + 'static> SnapshotProvider<S> {
                             );
                         }
                         Err(e) => {
-                            error!("Failed to auto-create snapshot at height {}: {}", target_height, e);
+                            error!(
+                                "Failed to auto-create snapshot at height {}: {}",
+                                target_height, e
+                            );
 
                             let _ = self
                                 .event_tx
@@ -1216,8 +1228,8 @@ impl<S: StateReader + 'static> SnapshotProviderInner<S> {
                     || current_height >= last_height + self.config.snapshot_interval);
 
             if should_create {
-                let target_height =
-                    (current_height / self.config.snapshot_interval) * self.config.snapshot_interval;
+                let target_height = (current_height / self.config.snapshot_interval)
+                    * self.config.snapshot_interval;
 
                 if target_height > last_height {
                     // We would call create_snapshot here, but we need the full provider
@@ -1242,4 +1254,3 @@ impl<S: StateReader + 'static> SnapshotProviderInner<S> {
         }
     }
 }
-

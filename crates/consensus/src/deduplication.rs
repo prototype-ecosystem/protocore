@@ -20,7 +20,7 @@
 use std::collections::{HashMap, HashSet};
 
 use parking_lot::RwLock;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use tracing::{debug, trace};
 
 use crate::types::{ConsensusMessage, Proposal, Vote, VoteType};
@@ -145,7 +145,7 @@ impl MessageDeduplicationCache {
         }
 
         let mut messages = self.messages_by_height.write();
-        let height_set = messages.entry(height).or_insert_with(HashSet::new);
+        let height_set = messages.entry(height).or_default();
 
         // Check per-height limit
         if height_set.len() >= self.config.max_messages_per_height {
@@ -307,7 +307,7 @@ pub fn compute_vote_id(vote: &Vote) -> MessageId {
     hasher.update(vote.height.to_le_bytes());
     hasher.update(vote.round.to_le_bytes());
     hasher.update(vote.validator_id.to_le_bytes());
-    hasher.update(&vote.block_hash);
+    hasher.update(vote.block_hash);
     let result = hasher.finalize();
     let mut id = [0u8; 32];
     id.copy_from_slice(&result);

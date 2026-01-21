@@ -4,7 +4,7 @@
 //! and can be started when a validator node runs.
 
 use protocore_config::{Config, GenesisValidator};
-use protocore_crypto::bls::{BlsPrivateKey, BlsPublicKey};
+use protocore_crypto::bls::BlsPrivateKey;
 use protocore_crypto::PrivateKey;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -32,7 +32,11 @@ fn generate_test_validator_keys(dir: &std::path::Path) -> (PathBuf, String, Stri
         "address": address_hex,
     });
 
-    std::fs::write(&key_path, serde_json::to_string_pretty(&key_content).unwrap()).unwrap();
+    std::fs::write(
+        &key_path,
+        serde_json::to_string_pretty(&key_content).unwrap(),
+    )
+    .unwrap();
 
     (key_path, bls_pubkey_hex, address_hex)
 }
@@ -48,7 +52,7 @@ fn create_test_config(validators: Vec<(String, String)>) -> Config {
             address,
             pubkey,
             stake: "10000000000000000000000".to_string(), // 10000 tokens
-            commission: 1000, // 10%
+            commission: 1000,                             // 10%
         })
         .collect();
 
@@ -80,7 +84,7 @@ fn test_bls_pubkey_parsing() {
     let bls_private_key = BlsPrivateKey::random();
     let bls_public_key = bls_private_key.public_key();
     let pubkey_bytes = bls_public_key.to_bytes();
-    let pubkey_hex = format!("0x{}", hex::encode(&pubkey_bytes));
+    let pubkey_hex = format!("0x{}", hex::encode(pubkey_bytes));
 
     // Verify we can decode it back
     let decoded = hex::decode(pubkey_hex.trim_start_matches("0x")).unwrap();
@@ -100,20 +104,8 @@ fn test_validator_set_construction() {
     let keypair2 = BlsPrivateKey::random();
 
     let validators = vec![
-        Validator::new(
-            0,
-            keypair1.public_key(),
-            [1u8; 20],
-            10000,
-            1000,
-        ),
-        Validator::new(
-            1,
-            keypair2.public_key(),
-            [2u8; 20],
-            10000,
-            1000,
-        ),
+        Validator::new(0, keypair1.public_key(), [1u8; 20], 10000, 1000),
+        Validator::new(1, keypair2.public_key(), [2u8; 20], 10000, 1000),
     ];
 
     let validator_set = ValidatorSet::new(validators);
@@ -125,14 +117,17 @@ fn test_validator_set_construction() {
     // Verify proposer rotation
     let proposer_h0_r0 = validator_set.proposer(0, 0);
     let proposer_h1_r0 = validator_set.proposer(1, 0);
-    assert_ne!(proposer_h0_r0.id, proposer_h1_r0.id, "Different heights should have different proposers");
+    assert_ne!(
+        proposer_h0_r0.id, proposer_h1_r0.id,
+        "Different heights should have different proposers"
+    );
 }
 
 #[test]
 fn test_consensus_channel_types() {
-    use tokio::sync::mpsc;
-    use protocore_consensus::{ConsensusMessage, CommittedBlock, TimeoutInfo, Proposal};
+    use protocore_consensus::{CommittedBlock, ConsensusMessage, Proposal, TimeoutInfo};
     use protocore_types::Block;
+    use tokio::sync::mpsc;
 
     // Verify channel types compile and work
     let (network_tx, mut network_rx) = mpsc::channel::<ConsensusMessage>(10);
@@ -144,7 +139,9 @@ fn test_consensus_channel_types() {
     let proposal = Proposal::new(1, 0, block, -1);
 
     // Channels should be usable
-    assert!(network_tx.try_send(ConsensusMessage::Proposal(proposal)).is_ok());
+    assert!(network_tx
+        .try_send(ConsensusMessage::Proposal(proposal))
+        .is_ok());
 
     // Verify we can receive
     assert!(network_rx.try_recv().is_ok());
@@ -153,12 +150,14 @@ fn test_consensus_channel_types() {
 /// Test that checks the consensus engine can be created with proper validator set
 #[test]
 fn test_consensus_engine_creation() {
-    use protocore_consensus::{ConsensusEngine, Validator, ValidatorSet, TimeoutConfig};
-    use protocore_consensus::{BlockValidator, BlockBuilder, CommittedBlock, ConsensusMessage, TimeoutInfo};
-    use protocore_types::{Block, BlockHeader, H256};
-    use tokio::sync::mpsc;
-    use std::sync::Arc;
     use async_trait::async_trait;
+    use protocore_consensus::{
+        BlockBuilder, BlockValidator, CommittedBlock, ConsensusMessage, TimeoutInfo,
+    };
+    use protocore_consensus::{ConsensusEngine, TimeoutConfig, Validator, ValidatorSet};
+    use protocore_types::{Block, BlockHeader, H256};
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
 
     // Hash type is [u8; 32]
     type Hash = [u8; 32];
@@ -190,15 +189,13 @@ fn test_consensus_engine_creation() {
     let bls_private_key = BlsPrivateKey::random();
 
     // Create validator set with one validator
-    let validators = vec![
-        Validator::new(
-            0,
-            bls_private_key.public_key(),
-            [1u8; 20],
-            10000,
-            1000,
-        ),
-    ];
+    let validators = vec![Validator::new(
+        0,
+        bls_private_key.public_key(),
+        [1u8; 20],
+        10000,
+        1000,
+    )];
     let validator_set = ValidatorSet::new(validators);
 
     // Create channels

@@ -64,10 +64,7 @@ impl ProtocoreBehaviour {
     ///
     /// # Returns
     /// A new `ProtocoreBehaviour` or an error
-    pub fn new(
-        keypair: &libp2p::identity::Keypair,
-        local_peer_id: PeerId,
-    ) -> crate::Result<Self> {
+    pub fn new(keypair: &libp2p::identity::Keypair, local_peer_id: PeerId) -> crate::Result<Self> {
         // Configure Gossipsub
         let gossipsub_config = gossipsub::ConfigBuilder::default()
             // Set message validation mode
@@ -109,7 +106,8 @@ impl ProtocoreBehaviour {
         .map_err(|e| crate::Error::Gossipsub(e.to_string()))?;
 
         // Configure Kademlia
-        let mut kademlia_config = kad::Config::new(libp2p::StreamProtocol::new("/protocore/kad/1.0.0"));
+        let mut kademlia_config =
+            kad::Config::new(libp2p::StreamProtocol::new("/protocore/kad/1.0.0"));
         kademlia_config
             .set_query_timeout(Duration::from_secs(60))
             .set_replication_factor(std::num::NonZeroUsize::new(20).unwrap())
@@ -122,13 +120,11 @@ impl ProtocoreBehaviour {
         let kademlia = Kademlia::with_config(local_peer_id, store, kademlia_config);
 
         // Configure Identify
-        let identify_config = identify::Config::new(
-            "/protocore/1.0.0".to_string(),
-            keypair.public(),
-        )
-        .with_agent_version(format!("protocore/{}", env!("CARGO_PKG_VERSION")))
-        .with_interval(Duration::from_secs(60)) // Periodic re-identification
-        .with_push_listen_addr_updates(true);
+        let identify_config =
+            identify::Config::new("/protocore/1.0.0".to_string(), keypair.public())
+                .with_agent_version(format!("protocore/{}", env!("CARGO_PKG_VERSION")))
+                .with_interval(Duration::from_secs(60)) // Periodic re-identification
+                .with_push_listen_addr_updates(true);
 
         let identify = Identify::new(identify_config);
 

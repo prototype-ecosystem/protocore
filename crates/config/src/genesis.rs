@@ -206,10 +206,9 @@ impl Default for GenesisConfig {
             }],
             validators: vec![GenesisValidator {
                 address: "0x0000000000000000000000000000000000000001".to_string(),
-                pubkey: "0x".to_string()
-                    + &"00".repeat(48), // Placeholder BLS pubkey
+                pubkey: "0x".to_string() + &"00".repeat(48), // Placeholder BLS pubkey
                 stake: "100000000000000000000000".to_string(), // 100,000 MCN
-                commission: 1000,                              // 10%
+                commission: 1000,                            // 10%
             }],
         }
     }
@@ -602,4 +601,3 @@ impl GenesisBlock {
         Ok(())
     }
 }
-

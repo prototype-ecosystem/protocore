@@ -1,8 +1,8 @@
 //! Tests for lib.rs constants and default paths
 
 use protocore_cli::{
-    APP_NAME, DEFAULT_CONFIG_FILE, DEFAULT_DATA_DIR, DEFAULT_KEYSTORE_DIR,
-    default_data_dir, default_keystore_dir, default_config_path,
+    default_config_path, default_data_dir, default_keystore_dir, APP_NAME, DEFAULT_CONFIG_FILE,
+    DEFAULT_DATA_DIR, DEFAULT_KEYSTORE_DIR,
 };
 
 #[test]

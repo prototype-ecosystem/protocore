@@ -234,7 +234,10 @@ impl MerkleProof {
                         key_offset += path_nibbles.len();
                         current_hash = child;
                     }
-                    TrieNode::Branch { children, value: branch_value } => {
+                    TrieNode::Branch {
+                        children,
+                        value: branch_value,
+                    } => {
                         if key_offset >= key_nibbles.len() {
                             return self.value == branch_value;
                         }
@@ -323,7 +326,10 @@ impl MerkleTrie {
                 };
                 self.store_node(leaf)
             }
-            TrieNode::Leaf { path: leaf_path, value: leaf_value } => {
+            TrieNode::Leaf {
+                path: leaf_path,
+                value: leaf_value,
+            } => {
                 let (leaf_nibbles, _) = Nibbles::decode_compact(&leaf_path);
 
                 if leaf_nibbles.0 == path.0 {
@@ -393,7 +399,10 @@ impl MerkleTrie {
                     }
                 }
             }
-            TrieNode::Extension { path: ext_path, child } => {
+            TrieNode::Extension {
+                path: ext_path,
+                child,
+            } => {
                 let (ext_nibbles, _) = Nibbles::decode_compact(&ext_path);
                 let common_len = ext_nibbles.common_prefix_len(&path);
 
@@ -460,7 +469,10 @@ impl MerkleTrie {
                     }
                 }
             }
-            TrieNode::Branch { mut children, value: branch_value } => {
+            TrieNode::Branch {
+                mut children,
+                value: branch_value,
+            } => {
                 if path.is_empty() {
                     let new_branch = TrieNode::Branch {
                         children,
@@ -500,7 +512,10 @@ impl MerkleTrie {
 
         match node {
             TrieNode::Empty => Ok(None),
-            TrieNode::Leaf { path: leaf_path, value } => {
+            TrieNode::Leaf {
+                path: leaf_path,
+                value,
+            } => {
                 let (leaf_nibbles, _) = Nibbles::decode_compact(&leaf_path);
                 if leaf_nibbles.0 == path.0 {
                     Ok(Some(value))
@@ -508,10 +523,12 @@ impl MerkleTrie {
                     Ok(None)
                 }
             }
-            TrieNode::Extension { path: ext_path, child } => {
+            TrieNode::Extension {
+                path: ext_path,
+                child,
+            } => {
                 let (ext_nibbles, _) = Nibbles::decode_compact(&ext_path);
-                if path.0.len() >= ext_nibbles.len()
-                    && path.0[..ext_nibbles.len()] == ext_nibbles.0
+                if path.0.len() >= ext_nibbles.len() && path.0[..ext_nibbles.len()] == ext_nibbles.0
                 {
                     let remaining = path.slice(ext_nibbles.len());
                     self.get_at(child, remaining)
@@ -560,7 +577,9 @@ impl MerkleTrie {
 
         match node {
             TrieNode::Empty => Ok(None),
-            TrieNode::Leaf { path: leaf_path, .. } => {
+            TrieNode::Leaf {
+                path: leaf_path, ..
+            } => {
                 let (leaf_nibbles, _) = Nibbles::decode_compact(&leaf_path);
                 if leaf_nibbles.0 == path.0 {
                     Ok(Some(EMPTY_ROOT))
@@ -568,10 +587,12 @@ impl MerkleTrie {
                     Ok(None)
                 }
             }
-            TrieNode::Extension { path: ext_path, child } => {
+            TrieNode::Extension {
+                path: ext_path,
+                child,
+            } => {
                 let (ext_nibbles, _) = Nibbles::decode_compact(&ext_path);
-                if path.0.len() >= ext_nibbles.len()
-                    && path.0[..ext_nibbles.len()] == ext_nibbles.0
+                if path.0.len() >= ext_nibbles.len() && path.0[..ext_nibbles.len()] == ext_nibbles.0
                 {
                     let remaining = path.slice(ext_nibbles.len());
                     if let Some(new_child) = self.delete_at(child, remaining)? {
@@ -591,13 +612,19 @@ impl MerkleTrie {
                     Ok(None)
                 }
             }
-            TrieNode::Branch { mut children, value } => {
+            TrieNode::Branch {
+                mut children,
+                value,
+            } => {
                 if path.is_empty() {
                     if value.is_none() {
                         return Ok(None);
                     }
                     // Remove value from branch
-                    let new_branch = TrieNode::Branch { children, value: None };
+                    let new_branch = TrieNode::Branch {
+                        children,
+                        value: None,
+                    };
                     Ok(Some(self.store_node(new_branch)?))
                 } else {
                     let nibble = path.0[0] as usize;
@@ -654,7 +681,10 @@ impl MerkleTrie {
 
         match &node {
             TrieNode::Empty => Ok(None),
-            TrieNode::Leaf { path: leaf_path, value } => {
+            TrieNode::Leaf {
+                path: leaf_path,
+                value,
+            } => {
                 let (leaf_nibbles, _) = Nibbles::decode_compact(leaf_path);
                 if leaf_nibbles.0 == path.0 {
                     Ok(Some(value.clone()))
@@ -662,10 +692,12 @@ impl MerkleTrie {
                     Ok(None)
                 }
             }
-            TrieNode::Extension { path: ext_path, child } => {
+            TrieNode::Extension {
+                path: ext_path,
+                child,
+            } => {
                 let (ext_nibbles, _) = Nibbles::decode_compact(ext_path);
-                if path.0.len() >= ext_nibbles.len()
-                    && path.0[..ext_nibbles.len()] == ext_nibbles.0
+                if path.0.len() >= ext_nibbles.len() && path.0[..ext_nibbles.len()] == ext_nibbles.0
                 {
                     let remaining = path.slice(ext_nibbles.len());
                     self.prove_at(*child, remaining, proof_nodes)
@@ -742,4 +774,3 @@ impl Clone for MerkleTrie {
 pub fn verify_proof(proof: &MerkleProof) -> bool {
     proof.verify()
 }
-

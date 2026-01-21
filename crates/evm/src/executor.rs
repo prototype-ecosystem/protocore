@@ -6,8 +6,8 @@
 use alloy_primitives::{Address as AlloyAddress, Bytes, B256, U256};
 use revm::{
     primitives::{
-        BlockEnv, CfgEnv, Env, EnvWithHandlerCfg,
-        ExecutionResult, HandlerCfg, Output, SpecId, TransactTo, TxEnv,
+        BlockEnv, CfgEnv, Env, EnvWithHandlerCfg, ExecutionResult, HandlerCfg, Output, SpecId,
+        TransactTo, TxEnv,
     },
     Database, DatabaseCommit, Evm,
 };
@@ -343,9 +343,8 @@ where
                 .with_env_with_handler_cfg(env)
                 .build();
 
-            evm.transact_commit().map_err(|e| {
-                ExecutionError::EvmError(format!("{:?}", e))
-            })?
+            evm.transact_commit()
+                .map_err(|e| ExecutionError::EvmError(format!("{:?}", e)))?
         };
 
         // Convert result
@@ -490,9 +489,8 @@ where
                 .with_env_with_handler_cfg(env)
                 .build();
 
-            evm.transact().map_err(|e| {
-                ExecutionError::EvmError(format!("{:?}", e))
-            })?
+            evm.transact()
+                .map_err(|e| ExecutionError::EvmError(format!("{:?}", e)))?
         };
 
         Ok(self.convert_execution_result(result.result))
@@ -716,8 +714,6 @@ where
     /// Each item (address or topic) sets 3 bits determined by the first 6 bytes
     /// of its Keccak256 hash.
     fn compute_logs_bloom(&self, logs: &[Log]) -> Vec<u8> {
-        use sha3::{Digest, Keccak256};
-
         let mut bloom = vec![0u8; 256];
 
         for log in logs {
@@ -790,10 +786,9 @@ where
         if receipts.is_empty() {
             // Empty trie root (keccak256 of RLP empty string)
             return B256::from_slice(&[
-                0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6,
-                0xff, 0x83, 0x45, 0xe6, 0x92, 0xc0, 0xf8, 0x6e,
-                0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c, 0xad, 0xc0,
-                0x01, 0x62, 0x2f, 0xb5, 0xe3, 0x63, 0xb4, 0x21,
+                0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6, 0xff, 0x83, 0x45, 0xe6, 0x92, 0xc0,
+                0xf8, 0x6e, 0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c, 0xad, 0xc0, 0x01, 0x62, 0x2f, 0xb5,
+                0xe3, 0x63, 0xb4, 0x21,
             ]);
         }
 
@@ -802,21 +797,21 @@ where
         let mut hasher = Keccak256::new();
         for (i, receipt) in receipts.iter().enumerate() {
             // Encode receipt fields
-            hasher.update(&[receipt.status]);
-            hasher.update(&receipt.cumulative_gas_used.to_le_bytes());
+            hasher.update([receipt.status]);
+            hasher.update(receipt.cumulative_gas_used.to_le_bytes());
             hasher.update(&receipt.logs_bloom);
-            hasher.update(&(receipt.logs.len() as u32).to_le_bytes());
+            hasher.update((receipt.logs.len() as u32).to_le_bytes());
             for log in &receipt.logs {
                 hasher.update(log.address.as_slice());
-                hasher.update(&(log.topics.len() as u32).to_le_bytes());
+                hasher.update((log.topics.len() as u32).to_le_bytes());
                 for topic in &log.topics {
                     hasher.update(topic.as_slice());
                 }
-                hasher.update(&(log.data.len() as u32).to_le_bytes());
+                hasher.update((log.data.len() as u32).to_le_bytes());
                 hasher.update(&log.data);
             }
             // Include index for ordering
-            hasher.update(&(i as u32).to_le_bytes());
+            hasher.update((i as u32).to_le_bytes());
         }
 
         B256::from_slice(&hasher.finalize())
@@ -829,7 +824,10 @@ where
         parent_gas_limit: u64,
         parent_base_fee: u128,
     ) -> u128 {
-        self.base_fee_calculator
-            .calculate_next_base_fee(parent_gas_used, parent_gas_limit, parent_base_fee)
+        self.base_fee_calculator.calculate_next_base_fee(
+            parent_gas_used,
+            parent_gas_limit,
+            parent_base_fee,
+        )
     }
 }

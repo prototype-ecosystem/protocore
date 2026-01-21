@@ -29,7 +29,10 @@ fn test_nibbles_compact_encoding() {
     trie.insert(&[0x12, 0x34, 0x56], b"odd").unwrap();
 
     assert_eq!(trie.get(&[0x12, 0x34]).unwrap(), Some(b"even".to_vec()));
-    assert_eq!(trie.get(&[0x12, 0x34, 0x56]).unwrap(), Some(b"odd".to_vec()));
+    assert_eq!(
+        trie.get(&[0x12, 0x34, 0x56]).unwrap(),
+        Some(b"odd".to_vec())
+    );
 }
 
 #[test]

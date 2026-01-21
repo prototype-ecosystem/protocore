@@ -1,8 +1,8 @@
 //! Tests for peer discovery functionality.
 
 use libp2p::{identity::Keypair, Multiaddr, PeerId};
-use protocore_p2p::{DiscoveryConfig, PeerDiscovery};
 use protocore_p2p::discovery::PeerRecord;
+use protocore_p2p::{DiscoveryConfig, PeerDiscovery};
 use std::time::Duration;
 
 fn test_peer_id() -> PeerId {

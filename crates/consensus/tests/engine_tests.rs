@@ -1,11 +1,9 @@
 //! Integration tests for consensus engine module.
 
-use protocore_consensus::{
-    BlockBuilder, BlockValidator, ConsensusEngine, ConsensusState, Step,
-};
 use protocore_consensus::timeout::TimeoutConfig;
-use protocore_consensus::types::{CommittedBlock, ConsensusMessage, Validator, ValidatorSet};
 use protocore_consensus::timeout::TimeoutInfo;
+use protocore_consensus::types::{CommittedBlock, ConsensusMessage, Validator, ValidatorSet};
+use protocore_consensus::{BlockBuilder, BlockValidator, ConsensusEngine, ConsensusState, Step};
 use protocore_crypto::bls::BlsPrivateKey;
 use protocore_crypto::Hash;
 use protocore_types::{Block, BlockHeader};
@@ -50,9 +48,7 @@ fn create_test_engine() -> (
     let (timeout_tx, timeout_rx) = mpsc::channel(100);
 
     let key = BlsPrivateKey::random();
-    let validators = vec![
-        Validator::new(0, key.public_key(), [0u8; 20], 1000, 500),
-    ];
+    let validators = vec![Validator::new(0, key.public_key(), [0u8; 20], 1000, 500)];
     let validator_set = ValidatorSet::new(validators);
 
     let engine = ConsensusEngine::new(

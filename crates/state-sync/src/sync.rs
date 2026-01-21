@@ -18,17 +18,12 @@
 //! 6. Finalization: Verify final state root and complete sync
 
 use crate::{
-    chunks::{
-        ChunkDownloadConfig, ChunkDownloadError, ChunkDownloadEvent, ChunkDownloader,
-        ChunkNetwork, ChunkReassembler, ChunkVerifier, StateChunk,
-    },
-    keccak256,
+    chunks::{ChunkDownloadConfig, ChunkDownloadError, ChunkDownloader, ChunkNetwork, StateChunk},
     snapshot::{
-        FinalityCertificate, SnapshotAvailability, SnapshotInfo, SnapshotList,
-        SnapshotListEntry, SnapshotMetadata, SnapshotRequest, SnapshotSelector,
+        FinalityCertificate, SnapshotAvailability, SnapshotList, SnapshotMetadata, SnapshotRequest,
+        SnapshotSelector,
     },
-    Hash, PeerId, DEFAULT_CHUNK_SIZE, DEFAULT_MAX_CONCURRENT_DOWNLOADS,
-    DEFAULT_REQUEST_TIMEOUT_SECS, DEFAULT_SNAPSHOT_INTERVAL,
+    Hash, PeerId, DEFAULT_REQUEST_TIMEOUT_SECS, DEFAULT_SNAPSHOT_INTERVAL,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -36,8 +31,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
-use tracing::{debug, error, info, trace, warn};
+use tokio::sync::{broadcast, Mutex, RwLock};
+use tracing::{debug, error, info, warn};
 
 /// Configuration for state synchronization
 #[derive(Debug, Clone)]
@@ -710,9 +705,7 @@ impl<N: SyncNetwork + 'static, S: StateStorage + 'static> StateSyncManager<N, S>
 
         // Start sync in background
         let manager = self.clone_inner();
-        let handle = tokio::spawn(async move {
-            manager.run_sync().await
-        });
+        let handle = tokio::spawn(async move { manager.run_sync().await });
 
         let mut task = self.sync_task.lock().await;
         *task = Some(handle);
@@ -741,73 +734,77 @@ impl<N: SyncNetwork + 'static, S: StateStorage + 'static> StateSyncManager<N, S>
     }
 
     /// Run the sync process
-    fn run_sync(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), StateSyncError>> + Send + '_>> {
+    fn run_sync(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), StateSyncError>> + Send + '_>>
+    {
         Box::pin(async move {
-        let start_time = Instant::now();
+            let start_time = Instant::now();
 
-        // Update progress start time
-        {
-            let mut progress = self.progress.write().await;
-            progress.started_at = Some(start_time);
-        }
-
-        let result = self.do_sync().await;
-
-        // Update end time
-        {
-            let mut progress = self.progress.write().await;
-            progress.ended_at = Some(Instant::now());
-        }
-
-        match &result {
-            Ok(()) => {
-                self.set_phase(SyncPhase::Completed).await;
-
-                let status = self.status.read().await;
-                let _ = self.event_tx.send(SyncEvent::Completed {
-                    height: status.snapshot.as_ref().map(|s| s.height).unwrap_or(0),
-                    duration: start_time.elapsed(),
-                });
-
-                // Clear saved progress
-                let _ = self.storage.clear_progress().await;
+            // Update progress start time
+            {
+                let mut progress = self.progress.write().await;
+                progress.started_at = Some(start_time);
             }
-            Err(e) => {
-                let error_str = e.to_string();
 
-                {
-                    let mut status = self.status.write().await;
-                    status.last_error = Some(error_str.clone());
+            let result = self.do_sync().await;
+
+            // Update end time
+            {
+                let mut progress = self.progress.write().await;
+                progress.ended_at = Some(Instant::now());
+            }
+
+            match &result {
+                Ok(()) => {
+                    self.set_phase(SyncPhase::Completed).await;
+
+                    let status = self.status.read().await;
+                    let _ = self.event_tx.send(SyncEvent::Completed {
+                        height: status.snapshot.as_ref().map(|s| s.height).unwrap_or(0),
+                        duration: start_time.elapsed(),
+                    });
+
+                    // Clear saved progress
+                    let _ = self.storage.clear_progress().await;
                 }
+                Err(e) => {
+                    let error_str = e.to_string();
 
-                // Check if we should retry
-                let should_retry = self.config.auto_restart && !matches!(e, StateSyncError::Cancelled);
-
-                if should_retry {
-                    let mut status = self.status.write().await;
-                    if status.restart_attempts < self.config.max_restart_attempts {
-                        status.restart_attempts += 1;
-                        let attempt = status.restart_attempts;
-                        drop(status);
-
-                        let _ = self.event_tx.send(SyncEvent::Restarting { attempt });
-
-                        tokio::time::sleep(self.config.restart_delay).await;
-
-                        // Recursive retry
-                        return self.run_sync().await;
+                    {
+                        let mut status = self.status.write().await;
+                        status.last_error = Some(error_str.clone());
                     }
+
+                    // Check if we should retry
+                    let should_retry =
+                        self.config.auto_restart && !matches!(e, StateSyncError::Cancelled);
+
+                    if should_retry {
+                        let mut status = self.status.write().await;
+                        if status.restart_attempts < self.config.max_restart_attempts {
+                            status.restart_attempts += 1;
+                            let attempt = status.restart_attempts;
+                            drop(status);
+
+                            let _ = self.event_tx.send(SyncEvent::Restarting { attempt });
+
+                            tokio::time::sleep(self.config.restart_delay).await;
+
+                            // Recursive retry
+                            return self.run_sync().await;
+                        }
+                    }
+
+                    self.set_phase(SyncPhase::Failed).await;
+                    let _ = self.event_tx.send(SyncEvent::Failed { error: error_str });
+
+                    // Rollback state
+                    let _ = self.storage.rollback_sync().await;
                 }
-
-                self.set_phase(SyncPhase::Failed).await;
-                let _ = self.event_tx.send(SyncEvent::Failed { error: error_str });
-
-                // Rollback state
-                let _ = self.storage.rollback_sync().await;
             }
-        }
 
-        result
+            result
         }) // End of Box::pin async block
     }
 
@@ -830,7 +827,7 @@ impl<N: SyncNetwork + 'static, S: StateStorage + 'static> StateSyncManager<N, S>
         self.storage
             .begin_sync(&snapshot)
             .await
-            .map_err(|e| StateSyncError::Storage(e))?;
+            .map_err(StateSyncError::Storage)?;
 
         // Update status with selected snapshot
         {
@@ -889,7 +886,7 @@ impl<N: SyncNetwork + 'static, S: StateStorage + 'static> StateSyncManager<N, S>
         self.storage
             .commit_sync()
             .await
-            .map_err(|e| StateSyncError::Storage(e))?;
+            .map_err(StateSyncError::Storage)?;
 
         Ok(())
     }
@@ -922,11 +919,8 @@ impl<N: SyncNetwork + 'static, S: StateStorage + 'static> StateSyncManager<N, S>
             let timeout = self.config.discovery_timeout;
 
             let task = tokio::spawn(async move {
-                let result = tokio::time::timeout(
-                    timeout,
-                    network.request_snapshots(peer, request),
-                )
-                .await;
+                let result =
+                    tokio::time::timeout(timeout, network.request_snapshots(peer, request)).await;
 
                 (peer, result)
             });
@@ -1058,12 +1052,9 @@ impl<N: SyncNetwork + 'static, S: StateStorage + 'static> StateSyncManager<N, S>
 
         match download_result {
             Ok(()) => Ok(()),
-            Err(ChunkDownloadError::IncompletDownload { missing }) => {
-                Err(StateSyncError::ChunkDownload(format!(
-                    "{} chunks failed to download",
-                    missing
-                )))
-            }
+            Err(ChunkDownloadError::IncompletDownload { missing }) => Err(
+                StateSyncError::ChunkDownload(format!("{} chunks failed to download", missing)),
+            ),
             Err(e) => Err(StateSyncError::ChunkDownload(e.to_string())),
         }
     }
@@ -1086,7 +1077,7 @@ impl<N: SyncNetwork + 'static, S: StateStorage + 'static> StateSyncManager<N, S>
             self.storage
                 .apply_chunk(chunk)
                 .await
-                .map_err(|e| StateSyncError::StateApplication(e))?;
+                .map_err(StateSyncError::StateApplication)?;
 
             // Update status
             {
@@ -1333,10 +1324,8 @@ impl<N: SyncNetwork + 'static, S: StateStorage + 'static> StateSyncManagerInner<
             let timeout = self.config.discovery_timeout;
 
             let task = tokio::spawn(async move {
-                let result = tokio::time::timeout(
-                    timeout,
-                    network.request_snapshots(peer, request),
-                ).await;
+                let result =
+                    tokio::time::timeout(timeout, network.request_snapshots(peer, request)).await;
                 (peer, result)
             });
 
@@ -1425,12 +1414,9 @@ impl<N: SyncNetwork + 'static, S: StateStorage + 'static> StateSyncManagerInner<
 
         match download_result {
             Ok(()) => Ok(()),
-            Err(ChunkDownloadError::IncompletDownload { missing }) => {
-                Err(StateSyncError::ChunkDownload(format!(
-                    "{} chunks failed to download",
-                    missing
-                )))
-            }
+            Err(ChunkDownloadError::IncompletDownload { missing }) => Err(
+                StateSyncError::ChunkDownload(format!("{} chunks failed to download", missing)),
+            ),
             Err(e) => Err(StateSyncError::ChunkDownload(e.to_string())),
         }
     }
@@ -1509,4 +1495,3 @@ fn format_bytes(bytes: u64) -> String {
         format!("{} B", bytes)
     }
 }
-

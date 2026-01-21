@@ -266,7 +266,10 @@ pub trait ProtocoreApi {
     /// # Returns
     /// Array of proposal objects.
     #[method(name = "getProposals")]
-    async fn get_proposals(&self, status: Option<ProposalStatus>) -> RpcResult<Vec<GovernanceProposal>>;
+    async fn get_proposals(
+        &self,
+        status: Option<ProposalStatus>,
+    ) -> RpcResult<Vec<GovernanceProposal>>;
 
     /// Returns current epoch information.
     ///
@@ -310,7 +313,10 @@ pub trait ProtocoreApi {
     /// # Returns
     /// Stealth address result with ephemeral pubkey.
     #[method(name = "generateStealthAddress")]
-    async fn generate_stealth_address(&self, meta_address: HexBytes) -> RpcResult<StealthAddressResult>;
+    async fn generate_stealth_address(
+        &self,
+        meta_address: HexBytes,
+    ) -> RpcResult<StealthAddressResult>;
 
     /// Returns validator information by address.
     ///
@@ -398,13 +404,19 @@ pub trait ProtocoreStateProvider: Send + Sync {
     async fn get_proposal(&self, id: u64) -> Result<Option<GovernanceProposal>, RpcError>;
 
     /// Get all proposals with optional status filter.
-    async fn get_proposals(&self, status: Option<ProposalStatus>) -> Result<Vec<GovernanceProposal>, RpcError>;
+    async fn get_proposals(
+        &self,
+        status: Option<ProposalStatus>,
+    ) -> Result<Vec<GovernanceProposal>, RpcError>;
 
     /// Get current epoch information.
     async fn get_epoch_info(&self) -> Result<EpochInfo, RpcError>;
 
     /// Get finality certificate for a block.
-    async fn get_finality_cert(&self, block: &BlockNumberOrTag) -> Result<Option<FinalityCert>, RpcError>;
+    async fn get_finality_cert(
+        &self,
+        block: &BlockNumberOrTag,
+    ) -> Result<Option<FinalityCert>, RpcError>;
 
     /// Check if a block is finalized.
     async fn is_finalized(&self, block: &BlockNumberOrTag) -> Result<bool, RpcError>;
@@ -413,7 +425,10 @@ pub trait ProtocoreStateProvider: Send + Sync {
     async fn finalized_block_number(&self) -> Result<u64, RpcError>;
 
     /// Generate a stealth address.
-    async fn generate_stealth_address(&self, meta_address: &[u8]) -> Result<StealthAddressResult, RpcError>;
+    async fn generate_stealth_address(
+        &self,
+        meta_address: &[u8],
+    ) -> Result<StealthAddressResult, RpcError>;
 
     /// Get pending rewards for an address.
     async fn get_pending_rewards(&self, address: &Address) -> Result<u128, RpcError>;
@@ -466,7 +481,11 @@ where
 
     #[instrument(skip(self), level = "debug")]
     async fn get_staking_info(&self, address: Address) -> RpcResult<StakingInfo> {
-        let info = self.state.get_staking_info(&address).await.map_err(rpc_err)?;
+        let info = self
+            .state
+            .get_staking_info(&address)
+            .await
+            .map_err(rpc_err)?;
         debug!(?address, "pc_getStakingInfo");
         Ok(info)
     }
@@ -474,12 +493,19 @@ where
     #[instrument(skip(self), level = "debug")]
     async fn get_governance_proposal(&self, id: HexU64) -> RpcResult<Option<GovernanceProposal>> {
         let proposal = self.state.get_proposal(id.0).await.map_err(rpc_err)?;
-        debug!(id = id.0, found = proposal.is_some(), "pc_getGovernanceProposal");
+        debug!(
+            id = id.0,
+            found = proposal.is_some(),
+            "pc_getGovernanceProposal"
+        );
         Ok(proposal)
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn get_proposals(&self, status: Option<ProposalStatus>) -> RpcResult<Vec<GovernanceProposal>> {
+    async fn get_proposals(
+        &self,
+        status: Option<ProposalStatus>,
+    ) -> RpcResult<Vec<GovernanceProposal>> {
         let proposals = self.state.get_proposals(status).await.map_err(rpc_err)?;
         debug!(?status, count = proposals.len(), "pc_getProposals");
         Ok(proposals)
@@ -494,7 +520,11 @@ where
 
     #[instrument(skip(self), level = "debug")]
     async fn get_finality_cert(&self, block: BlockNumberOrTag) -> RpcResult<Option<FinalityCert>> {
-        let cert = self.state.get_finality_cert(&block).await.map_err(rpc_err)?;
+        let cert = self
+            .state
+            .get_finality_cert(&block)
+            .await
+            .map_err(rpc_err)?;
         debug!(?block, found = cert.is_some(), "pc_getFinalityCert");
         Ok(cert)
     }
@@ -514,7 +544,10 @@ where
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn generate_stealth_address(&self, meta_address: HexBytes) -> RpcResult<StealthAddressResult> {
+    async fn generate_stealth_address(
+        &self,
+        meta_address: HexBytes,
+    ) -> RpcResult<StealthAddressResult> {
         let result = self
             .state
             .generate_stealth_address(&meta_address.0)
@@ -533,14 +566,22 @@ where
 
     #[instrument(skip(self), level = "debug")]
     async fn get_pending_rewards(&self, address: Address) -> RpcResult<String> {
-        let rewards = self.state.get_pending_rewards(&address).await.map_err(rpc_err)?;
+        let rewards = self
+            .state
+            .get_pending_rewards(&address)
+            .await
+            .map_err(rpc_err)?;
         debug!(?address, rewards, "pc_getPendingRewards");
         Ok(format!("0x{:x}", rewards))
     }
 
     #[instrument(skip(self), level = "debug")]
     async fn get_min_validator_stake(&self) -> RpcResult<String> {
-        let stake = self.state.get_min_validator_stake().await.map_err(rpc_err)?;
+        let stake = self
+            .state
+            .get_min_validator_stake()
+            .await
+            .map_err(rpc_err)?;
         debug!(stake, "pc_getMinValidatorStake");
         Ok(format!("0x{:x}", stake))
     }
@@ -559,4 +600,3 @@ where
         Ok(stats)
     }
 }
-

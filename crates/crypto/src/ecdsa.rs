@@ -237,7 +237,7 @@ impl PublicKey {
         prefixed[0] = 0x04;
         prefixed[1..].copy_from_slice(bytes);
 
-        let point = EncodedPoint::from_bytes(&prefixed)
+        let point = EncodedPoint::from_bytes(prefixed)
             .map_err(|e| CryptoError::InvalidPublicKey(e.to_string()))?;
 
         let public_key = K256PublicKey::from_encoded_point(&point);
@@ -616,4 +616,3 @@ pub fn verify_checksum_address(address: &str) -> bool {
     let expected = checksum_address(&bytes);
     format!("0x{}", address) == expected
 }
-

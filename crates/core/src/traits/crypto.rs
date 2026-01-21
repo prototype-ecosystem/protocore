@@ -155,7 +155,8 @@ pub trait Verifier: Send + Sync {
     /// Verify a signature against a message and public key.
     ///
     /// Returns `Ok(())` if the signature is valid, `Err(CryptoError::InvalidSignature)` otherwise.
-    fn verify(&self, message: &[u8], signature: &Signature, pubkey: &PublicKey) -> CryptoResult<()>;
+    fn verify(&self, message: &[u8], signature: &Signature, pubkey: &PublicKey)
+        -> CryptoResult<()>;
 
     /// Get the signature scheme this verifier supports.
     fn scheme(&self) -> SignatureScheme;
@@ -218,11 +219,8 @@ pub trait BlsAggregator: Send + Sync {
     /// Verify proof of possession for a BLS public key.
     ///
     /// PoP prevents rogue key attacks by proving the signer knows the private key.
-    fn verify_proof_of_possession(
-        &self,
-        pubkey: &PublicKey,
-        proof: &Signature,
-    ) -> CryptoResult<()>;
+    fn verify_proof_of_possession(&self, pubkey: &PublicKey, proof: &Signature)
+        -> CryptoResult<()>;
 }
 
 /// Trait for key pair generation.

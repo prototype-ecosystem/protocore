@@ -41,7 +41,7 @@ pub mod commands;
 pub mod utils;
 
 // Re-export the main CLI types for convenience
-pub use commands::{Cli, Commands, run_cli};
+pub use commands::{run_cli, Cli, Commands};
 pub use utils::{CliError, CliResult, OutputFormat};
 
 /// Version information for the CLI
@@ -81,4 +81,3 @@ pub fn default_keystore_dir() -> std::path::PathBuf {
 pub fn default_config_path() -> std::path::PathBuf {
     default_data_dir().join(DEFAULT_CONFIG_FILE)
 }
-

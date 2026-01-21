@@ -1,7 +1,7 @@
 //! Tests for commands/query.rs blockchain query functionality
 
 use clap::Parser;
-use protocore_cli::commands::query::{BlockArgs, AccountArgs};
+use protocore_cli::commands::query::{AccountArgs, BlockArgs};
 
 #[test]
 fn test_parse_block_param() {

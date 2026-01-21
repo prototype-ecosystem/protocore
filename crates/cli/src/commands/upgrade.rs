@@ -10,11 +10,11 @@ use console::style;
 use dialoguer::Confirm;
 use std::path::PathBuf;
 
-use crate::utils::{
-    format_timestamp, format_with_commas, CliError, CliResult, OutputFormat, RpcClient,
-    TransactionSigner, print_info, print_success, print_warning,
-};
 use crate::default_keystore_dir;
+use crate::utils::{
+    format_timestamp, format_with_commas, print_info, print_success, print_warning, CliError,
+    CliResult, OutputFormat, RpcClient, TransactionSigner,
+};
 
 /// Upgrade subcommands
 #[derive(Subcommand, Debug)]
@@ -37,8 +37,8 @@ pub struct StatusArgs {
     pub rpc: String,
 
     /// Show detailed information including voter breakdown
-    #[arg(long, short)]
-    pub verbose: bool,
+    #[arg(long, short = 'd')]
+    pub detailed: bool,
 }
 
 /// Arguments for vote command
@@ -133,10 +133,9 @@ async fn execute_status(args: StatusArgs, output_format: OutputFormat) -> CliRes
                     } else {
                         style("○").yellow()
                     };
-                    println!("Approval:        {:.0}% (threshold: {:.0}%) {}",
-                        upgrade.approval_percentage,
-                        upgrade.threshold_percentage,
-                        approval_icon
+                    println!(
+                        "Approval:        {:.0}% (threshold: {:.0}%) {}",
+                        upgrade.approval_percentage, upgrade.threshold_percentage, approval_icon
                     );
 
                     // Your vote status
@@ -152,14 +151,20 @@ async fn execute_status(args: StatusArgs, output_format: OutputFormat) -> CliRes
                     };
                     println!("Your vote:       {}", vote_display);
 
-                    if args.verbose {
+                    if args.detailed {
                         println!();
                         println!("Details:");
                         println!("  Proposal ID:     {}", upgrade.proposal_id);
-                        println!("  Current block:   {}", format_with_commas(upgrade.current_block as u128));
+                        println!(
+                            "  Current block:   {}",
+                            format_with_commas(upgrade.current_block as u128)
+                        );
                         println!("  Binary hash:     {}...", &upgrade.binary_hash[..40]);
                         println!("  Total validators: {}", upgrade.total_validators);
-                        println!("  Votes (yes/no):  {}/{}", upgrade.yes_votes, upgrade.no_votes);
+                        println!(
+                            "  Votes (yes/no):  {}/{}",
+                            upgrade.yes_votes, upgrade.no_votes
+                        );
 
                         if !upgrade.changelog.is_empty() {
                             println!();
@@ -189,7 +194,8 @@ async fn execute_status(args: StatusArgs, output_format: OutputFormat) -> CliRes
                     println!();
                     println!("Current version: v{}", env!("CARGO_PKG_VERSION"));
                     if let Some(ref latest) = upgrade_status.latest_upgrade {
-                        println!("Last upgrade:    {} (block {})",
+                        println!(
+                            "Last upgrade:    {} (block {})",
                             latest.version,
                             format_with_commas(latest.activation_block as u128)
                         );
@@ -207,7 +213,7 @@ async fn execute_vote(args: VoteArgs, output_format: OutputFormat) -> CliResult<
     // Validate vote choice
     if !args.yes && !args.no {
         return Err(CliError::InvalidArgument(
-            "Must specify either --yes or --no".to_string()
+            "Must specify either --yes or --no".to_string(),
         ));
     }
 
@@ -217,9 +223,9 @@ async fn execute_vote(args: VoteArgs, output_format: OutputFormat) -> CliResult<
     // Get the pending upgrade to verify proposal exists
     let upgrade_status = client.get_pending_upgrade().await?;
 
-    let upgrade = upgrade_status.pending_upgrade.ok_or_else(|| {
-        CliError::InvalidArgument("No pending upgrade to vote on".to_string())
-    })?;
+    let upgrade = upgrade_status
+        .pending_upgrade
+        .ok_or_else(|| CliError::InvalidArgument("No pending upgrade to vote on".to_string()))?;
 
     if upgrade.proposal_id != args.proposal_id {
         return Err(CliError::InvalidArgument(format!(
@@ -247,13 +253,19 @@ async fn execute_vote(args: VoteArgs, output_format: OutputFormat) -> CliResult<
         println!("Upgrade Details:");
         println!("  Proposal ID:  {}", upgrade.proposal_id);
         println!("  Version:      {}", upgrade.version);
-        println!("  Activation:   block {}", format_with_commas(upgrade.activation_block as u128));
+        println!(
+            "  Activation:   block {}",
+            format_with_commas(upgrade.activation_block as u128)
+        );
         println!("  Your vote:    {}", vote_choice.to_uppercase());
         println!();
 
         if !Confirm::new()
-            .with_prompt(&format!("Submit {} vote on upgrade proposal #{}?",
-                vote_choice.to_uppercase(), args.proposal_id))
+            .with_prompt(format!(
+                "Submit {} vote on upgrade proposal #{}?",
+                vote_choice.to_uppercase(),
+                args.proposal_id
+            ))
             .default(false)
             .interact()?
         {
@@ -262,25 +274,33 @@ async fn execute_vote(args: VoteArgs, output_format: OutputFormat) -> CliResult<
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
-    let tx_hash = client.send_upgrade_vote_transaction(
-        &signer,
-        args.proposal_id,
-        args.yes, // true = yes, false = no
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_upgrade_vote_transaction(
+            &signer,
+            args.proposal_id,
+            args.yes, // true = yes, false = no
+            args.gas,
+            args.gas_price,
+        )
+        .await?;
 
     match output_format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "status": "submitted",
-                "proposal_id": args.proposal_id,
-                "vote": vote_choice,
-                "transaction_hash": tx_hash,
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": "submitted",
+                    "proposal_id": args.proposal_id,
+                    "vote": vote_choice,
+                    "transaction_hash": tx_hash,
+                }))?
+            );
         }
         OutputFormat::Text => {
             print_success(&format!(
@@ -314,8 +334,10 @@ async fn execute_history(args: HistoryArgs, output_format: OutputFormat) -> CliR
             } else {
                 println!("Upgrade History ({} upgrades)", history.len());
                 println!();
-                println!("{:<12} {:<16} {:<14} {:<12} {:<20}",
-                    "VERSION", "BLOCK", "APPROVAL", "STATUS", "DATE");
+                println!(
+                    "{:<12} {:<16} {:<14} {:<12} {:<20}",
+                    "VERSION", "BLOCK", "APPROVAL", "STATUS", "DATE"
+                );
                 println!("{}", "-".repeat(76));
 
                 for upgrade in &history {
@@ -326,7 +348,8 @@ async fn execute_history(args: HistoryArgs, output_format: OutputFormat) -> CliR
                         _ => upgrade.status.clone(),
                     };
 
-                    println!("{:<12} {:<16} {:<14} {:<12} {:<20}",
+                    println!(
+                        "{:<12} {:<16} {:<14} {:<12} {:<20}",
                         upgrade.version,
                         format_with_commas(upgrade.activation_block as u128),
                         format!("{:.1}%", upgrade.final_approval),
@@ -418,4 +441,3 @@ pub struct CompletedUpgrade {
     /// Timestamp when upgrade was finalized
     pub timestamp: u64,
 }
-

@@ -3,7 +3,9 @@
 //! This module provides the main RPC server that combines HTTP and WebSocket
 //! endpoints with all the Ethereum and Proto Core RPC methods.
 
-use crate::eth::{EthApiImpl, EthApiServer, NetApiImpl, NetApiServer, StateProvider, Web3ApiImpl, Web3ApiServer};
+use crate::eth::{
+    EthApiImpl, EthApiServer, NetApiImpl, NetApiServer, StateProvider, Web3ApiImpl, Web3ApiServer,
+};
 use crate::protocore::{ProtocoreApiImpl, ProtocoreApiServer, ProtocoreStateProvider};
 use crate::ws::{SubscriptionApiImpl, SubscriptionApiServer, SubscriptionManager};
 use crate::RpcError;
@@ -56,7 +58,7 @@ impl Default for RpcServerConfig {
             ws_addr: "127.0.0.1:8546".parse().unwrap(),
             chain_id: 123456,
             max_connections: 1000,
-            max_request_size: 10 * 1024 * 1024, // 10 MB
+            max_request_size: 10 * 1024 * 1024,  // 10 MB
             max_response_size: 10 * 1024 * 1024, // 10 MB
             request_timeout: Duration::from_secs(30),
             enable_cors: true,
@@ -110,8 +112,8 @@ where
         let mut module = RpcModule::new(());
 
         // Add Ethereum API
-        let eth_api = EthApiImpl::new(self.state.clone())
-            .with_max_logs(self.config.max_logs_per_request);
+        let eth_api =
+            EthApiImpl::new(self.state.clone()).with_max_logs(self.config.max_logs_per_request);
         module
             .merge(eth_api.into_rpc())
             .map_err(|e| RpcError::Internal(format!("Failed to merge eth API: {}", e)))?;
@@ -447,4 +449,3 @@ impl Default for HealthCheckResponse {
         }
     }
 }
-

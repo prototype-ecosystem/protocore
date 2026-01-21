@@ -1,7 +1,6 @@
 //! Tests for commands/init.rs initialization functionality
 
-use clap::Parser;
-use protocore_cli::commands::init::{InitArgs, execute};
+use protocore_cli::commands::init::{execute, InitArgs};
 use protocore_cli::utils::OutputFormat;
 use protocore_cli::DEFAULT_KEYSTORE_DIR;
 use tempfile::tempdir;

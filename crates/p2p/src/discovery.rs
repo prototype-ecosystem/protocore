@@ -328,7 +328,11 @@ impl PeerDiscovery {
         if let Some(record) = self.peers.get_mut(&peer_id) {
             record.mark_connected();
         }
-        debug!(?peer_id, connected = self.connected_peers.len(), "Peer connected");
+        debug!(
+            ?peer_id,
+            connected = self.connected_peers.len(),
+            "Peer connected"
+        );
     }
 
     /// Mark peer as disconnected
@@ -337,7 +341,11 @@ impl PeerDiscovery {
         if let Some(record) = self.peers.get_mut(peer_id) {
             record.mark_disconnected();
         }
-        debug!(?peer_id, connected = self.connected_peers.len(), "Peer disconnected");
+        debug!(
+            ?peer_id,
+            connected = self.connected_peers.len(),
+            "Peer disconnected"
+        );
     }
 
     /// Get all known peers
@@ -497,11 +505,7 @@ impl PeerDiscovery {
         }
     }
 
-    fn handle_query_progress(
-        &mut self,
-        query_id: QueryId,
-        result: &kad::QueryResult,
-    ) {
+    fn handle_query_progress(&mut self, query_id: QueryId, result: &kad::QueryResult) {
         let query = match self.active_queries.get(&query_id) {
             Some(q) => q,
             None => return,
@@ -866,8 +870,7 @@ impl MultiMethodDiscovery {
     pub fn handle_pex_response(&mut self, _from: PeerId, peers: Vec<PexPeerInfo>) {
         for pex_info in peers {
             if let Some((peer_id, addresses)) = pex_info.to_peer_info() {
-                let peer =
-                    DiscoveredPeer::new(peer_id, addresses, DiscoveryMethod::PeerExchange);
+                let peer = DiscoveredPeer::new(peer_id, addresses, DiscoveryMethod::PeerExchange);
                 self.add_discovered_peer(peer);
             }
         }
@@ -1016,16 +1019,9 @@ mod multi_discovery_tests {
     #[test]
     fn test_method_priority() {
         // Static peers should have highest priority
-        let static_peer = DiscoveredPeer::new(
-            PeerId::random(),
-            vec![],
-            DiscoveryMethod::StaticPeers,
-        );
-        let dht_peer = DiscoveredPeer::new(
-            PeerId::random(),
-            vec![],
-            DiscoveryMethod::KademliaDHT,
-        );
+        let static_peer =
+            DiscoveredPeer::new(PeerId::random(), vec![], DiscoveryMethod::StaticPeers);
+        let dht_peer = DiscoveredPeer::new(PeerId::random(), vec![], DiscoveryMethod::KademliaDHT);
         assert!(static_peer.priority > dht_peer.priority);
     }
 
@@ -1063,7 +1059,10 @@ mod multi_discovery_tests {
         assert!(result.is_some());
         let (peer_id, addresses) = result.unwrap();
         assert!(!addresses.is_empty());
-        assert_eq!(peer_id.to_string(), "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN");
+        assert_eq!(
+            peer_id.to_string(),
+            "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN"
+        );
     }
 
     #[test]

@@ -12,9 +12,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use protocore_types::{Address, SignedTransaction, H256};
 use parking_lot::RwLock;
-use tracing::{debug, info, trace, warn};
+use protocore_types::{Address, SignedTransaction, H256};
+use tracing::{debug, info, trace};
 
 use crate::validation::{AccountStateProvider, TransactionValidator, ValidationConfig};
 use crate::{MempoolError, Result};
@@ -56,8 +56,8 @@ impl Default for MempoolConfig {
             price_bump_percentage: 10,
             max_pending_per_sender: 64,
             max_queued_per_sender: 64,
-            dedup_retention_blocks: 128,  // Keep hashes for ~128 blocks
-            dedup_max_size: 100_000,      // Max 100k seen hashes
+            dedup_retention_blocks: 128, // Keep hashes for ~128 blocks
+            dedup_max_size: 100_000,     // Max 100k seen hashes
         }
     }
 }
@@ -220,7 +220,7 @@ impl TransactionDeduplicationCache {
         }
 
         // Record the hash
-        let height_set = self.seen_by_height.entry(self.current_height).or_insert_with(HashSet::new);
+        let height_set = self.seen_by_height.entry(self.current_height).or_default();
         height_set.insert(hash);
         self.total_count += 1;
         true
@@ -241,7 +241,7 @@ impl TransactionDeduplicationCache {
                         self.evict_height(oldest_height);
                     }
                 }
-                let height_set = self.seen_by_height.entry(block_height).or_insert_with(HashSet::new);
+                let height_set = self.seen_by_height.entry(block_height).or_default();
                 height_set.insert(*hash);
                 self.total_count += 1;
             }
@@ -263,7 +263,8 @@ impl TransactionDeduplicationCache {
         }
 
         let threshold = self.current_height - self.retention_blocks;
-        let heights_to_evict: Vec<u64> = self.seen_by_height
+        let heights_to_evict: Vec<u64> = self
+            .seen_by_height
             .keys()
             .filter(|&&h| h < threshold)
             .copied()
@@ -568,8 +569,7 @@ impl<S: AccountStateProvider> Mempool<S> {
             }
 
             // Remove from price-sorted index
-            let price_key =
-                PriceOrderKey::new(pending_tx.gas_price, pending_tx.received_at, *hash);
+            let price_key = PriceOrderKey::new(pending_tx.gas_price, pending_tx.received_at, *hash);
             inner.pending_by_price.remove(&price_key);
         }
     }
@@ -660,16 +660,13 @@ impl<S: AccountStateProvider> Mempool<S> {
 
     /// Evict lowest gas price queued transaction from a sender
     fn evict_queued_from_sender(&self, inner: &mut MempoolInner, sender: &Address) -> Result<()> {
-        let lowest_hash = inner
-            .queued_by_sender
-            .get(sender)
-            .and_then(|nonces| {
-                nonces
-                    .values()
-                    .filter_map(|h| inner.by_hash.get(h))
-                    .min_by_key(|tx| tx.gas_price)
-                    .map(|tx| tx.hash())
-            });
+        let lowest_hash = inner.queued_by_sender.get(sender).and_then(|nonces| {
+            nonces
+                .values()
+                .filter_map(|h| inner.by_hash.get(h))
+                .min_by_key(|tx| tx.gas_price)
+                .map(|tx| tx.hash())
+        });
 
         if let Some(hash) = lowest_hash {
             self.remove_from_queued_pool(inner, &hash);
@@ -850,11 +847,7 @@ impl<S: AccountStateProvider> Mempool<S> {
 
     /// Get a transaction by hash
     pub fn get_transaction(&self, hash: &H256) -> Option<SignedTransaction> {
-        self.inner
-            .read()
-            .by_hash
-            .get(hash)
-            .map(|p| p.tx.clone())
+        self.inner.read().by_hash.get(hash).map(|p| p.tx.clone())
     }
 
     /// Get a pending transaction with metadata by hash
@@ -1027,17 +1020,9 @@ impl<S: AccountStateProvider> Mempool<S> {
     pub fn stats(&self) -> MempoolStats {
         let inner = self.inner.read();
 
-        let pending_count = inner
-            .pending_by_sender
-            .values()
-            .map(|m| m.len())
-            .sum();
+        let pending_count = inner.pending_by_sender.values().map(|m| m.len()).sum();
 
-        let queued_count = inner
-            .queued_by_sender
-            .values()
-            .map(|m| m.len())
-            .sum();
+        let queued_count = inner.queued_by_sender.values().map(|m| m.len()).sum();
 
         MempoolStats {
             pending_count,

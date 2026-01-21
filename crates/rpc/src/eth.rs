@@ -56,7 +56,11 @@ pub trait EthApi {
     /// # Returns
     /// Hex-encoded transaction count.
     #[method(name = "getTransactionCount")]
-    async fn get_transaction_count(&self, address: Address, block: BlockNumberOrTag) -> RpcResult<String>;
+    async fn get_transaction_count(
+        &self,
+        address: Address,
+        block: BlockNumberOrTag,
+    ) -> RpcResult<String>;
 
     /// Submits a signed transaction to the network.
     ///
@@ -88,7 +92,11 @@ pub trait EthApi {
     /// # Returns
     /// Hex-encoded gas estimate.
     #[method(name = "estimateGas")]
-    async fn estimate_gas(&self, tx: CallRequest, block: Option<BlockNumberOrTag>) -> RpcResult<String>;
+    async fn estimate_gas(
+        &self,
+        tx: CallRequest,
+        block: Option<BlockNumberOrTag>,
+    ) -> RpcResult<String>;
 
     /// Returns a block by number.
     ///
@@ -99,7 +107,11 @@ pub trait EthApi {
     /// # Returns
     /// Block object or null if not found.
     #[method(name = "getBlockByNumber")]
-    async fn get_block_by_number(&self, block: BlockNumberOrTag, full: bool) -> RpcResult<Option<RpcBlock>>;
+    async fn get_block_by_number(
+        &self,
+        block: BlockNumberOrTag,
+        full: bool,
+    ) -> RpcResult<Option<RpcBlock>>;
 
     /// Returns a block by hash.
     ///
@@ -153,7 +165,12 @@ pub trait EthApi {
     /// # Returns
     /// Hex-encoded 32-byte value.
     #[method(name = "getStorageAt")]
-    async fn get_storage_at(&self, address: Address, position: H256, block: BlockNumberOrTag) -> RpcResult<String>;
+    async fn get_storage_at(
+        &self,
+        address: Address,
+        position: H256,
+        block: BlockNumberOrTag,
+    ) -> RpcResult<String>;
 
     /// Returns the current gas price.
     ///
@@ -225,7 +242,10 @@ pub trait EthApi {
     /// # Returns
     /// Hex-encoded transaction count.
     #[method(name = "getBlockTransactionCountByNumber")]
-    async fn get_block_transaction_count_by_number(&self, block: BlockNumberOrTag) -> RpcResult<Option<String>>;
+    async fn get_block_transaction_count_by_number(
+        &self,
+        block: BlockNumberOrTag,
+    ) -> RpcResult<Option<String>>;
 
     /// Returns the block transaction count by hash.
     ///
@@ -284,16 +304,32 @@ pub trait StateProvider: Send + Sync {
     async fn block_number(&self) -> Result<u64, RpcError>;
 
     /// Get an account balance.
-    async fn get_balance(&self, address: &Address, block: &BlockNumberOrTag) -> Result<u128, RpcError>;
+    async fn get_balance(
+        &self,
+        address: &Address,
+        block: &BlockNumberOrTag,
+    ) -> Result<u128, RpcError>;
 
     /// Get the transaction count (nonce) for an address.
-    async fn get_transaction_count(&self, address: &Address, block: &BlockNumberOrTag) -> Result<u64, RpcError>;
+    async fn get_transaction_count(
+        &self,
+        address: &Address,
+        block: &BlockNumberOrTag,
+    ) -> Result<u64, RpcError>;
 
     /// Get a block by number.
-    async fn get_block_by_number(&self, block: &BlockNumberOrTag, full: bool) -> Result<Option<RpcBlock>, RpcError>;
+    async fn get_block_by_number(
+        &self,
+        block: &BlockNumberOrTag,
+        full: bool,
+    ) -> Result<Option<RpcBlock>, RpcError>;
 
     /// Get a block by hash.
-    async fn get_block_by_hash(&self, hash: &H256, full: bool) -> Result<Option<RpcBlock>, RpcError>;
+    async fn get_block_by_hash(
+        &self,
+        hash: &H256,
+        full: bool,
+    ) -> Result<Option<RpcBlock>, RpcError>;
 
     /// Get a transaction by hash.
     async fn get_transaction(&self, hash: &H256) -> Result<Option<RpcTransaction>, RpcError>;
@@ -302,16 +338,29 @@ pub trait StateProvider: Send + Sync {
     async fn get_receipt(&self, hash: &H256) -> Result<Option<RpcReceipt>, RpcError>;
 
     /// Get contract code at an address.
-    async fn get_code(&self, address: &Address, block: &BlockNumberOrTag) -> Result<Vec<u8>, RpcError>;
+    async fn get_code(
+        &self,
+        address: &Address,
+        block: &BlockNumberOrTag,
+    ) -> Result<Vec<u8>, RpcError>;
 
     /// Get storage value at a position.
-    async fn get_storage(&self, address: &Address, position: &H256, block: &BlockNumberOrTag) -> Result<H256, RpcError>;
+    async fn get_storage(
+        &self,
+        address: &Address,
+        position: &H256,
+        block: &BlockNumberOrTag,
+    ) -> Result<H256, RpcError>;
 
     /// Execute a call (read-only).
     async fn call(&self, tx: &CallRequest, block: &BlockNumberOrTag) -> Result<Vec<u8>, RpcError>;
 
     /// Estimate gas for a transaction.
-    async fn estimate_gas(&self, tx: &CallRequest, block: &BlockNumberOrTag) -> Result<u64, RpcError>;
+    async fn estimate_gas(
+        &self,
+        tx: &CallRequest,
+        block: &BlockNumberOrTag,
+    ) -> Result<u64, RpcError>;
 
     /// Get the current gas price.
     async fn gas_price(&self) -> Result<u64, RpcError>;
@@ -334,16 +383,30 @@ pub trait StateProvider: Send + Sync {
     async fn send_raw_transaction(&self, data: &[u8]) -> Result<H256, RpcError>;
 
     /// Get block transaction count.
-    async fn get_block_transaction_count(&self, block: &BlockNumberOrTag) -> Result<Option<u64>, RpcError>;
+    async fn get_block_transaction_count(
+        &self,
+        block: &BlockNumberOrTag,
+    ) -> Result<Option<u64>, RpcError>;
 
     /// Get block transaction count by hash.
-    async fn get_block_transaction_count_by_hash(&self, hash: &H256) -> Result<Option<u64>, RpcError>;
+    async fn get_block_transaction_count_by_hash(
+        &self,
+        hash: &H256,
+    ) -> Result<Option<u64>, RpcError>;
 
     /// Get transaction by block and index.
-    async fn get_transaction_by_index(&self, block: &BlockNumberOrTag, index: u64) -> Result<Option<RpcTransaction>, RpcError>;
+    async fn get_transaction_by_index(
+        &self,
+        block: &BlockNumberOrTag,
+        index: u64,
+    ) -> Result<Option<RpcTransaction>, RpcError>;
 
     /// Get transaction by block hash and index.
-    async fn get_transaction_by_hash_and_index(&self, hash: &H256, index: u64) -> Result<Option<RpcTransaction>, RpcError>;
+    async fn get_transaction_by_hash_and_index(
+        &self,
+        hash: &H256,
+        index: u64,
+    ) -> Result<Option<RpcTransaction>, RpcError>;
 }
 
 // ============================================================================
@@ -401,14 +464,26 @@ where
 
     #[instrument(skip(self), level = "debug")]
     async fn get_balance(&self, address: Address, block: BlockNumberOrTag) -> RpcResult<String> {
-        let balance = self.state.get_balance(&address, &block).await.map_err(rpc_err)?;
+        let balance = self
+            .state
+            .get_balance(&address, &block)
+            .await
+            .map_err(rpc_err)?;
         debug!(?address, ?block, balance, "eth_getBalance");
         Ok(format!("0x{:x}", balance))
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn get_transaction_count(&self, address: Address, block: BlockNumberOrTag) -> RpcResult<String> {
-        let count = self.state.get_transaction_count(&address, &block).await.map_err(rpc_err)?;
+    async fn get_transaction_count(
+        &self,
+        address: Address,
+        block: BlockNumberOrTag,
+    ) -> RpcResult<String> {
+        let count = self
+            .state
+            .get_transaction_count(&address, &block)
+            .await
+            .map_err(rpc_err)?;
         debug!(?address, ?block, count, "eth_getTransactionCount");
         Ok(format!("0x{:x}", count))
     }
@@ -416,7 +491,11 @@ where
     #[instrument(skip(self), level = "debug")]
     async fn send_raw_transaction(&self, data: HexBytes) -> RpcResult<H256> {
         info!(data_len = data.0.len(), "eth_sendRawTransaction");
-        let hash = self.state.send_raw_transaction(&data.0).await.map_err(rpc_err)?;
+        let hash = self
+            .state
+            .send_raw_transaction(&data.0)
+            .await
+            .map_err(rpc_err)?;
         debug!(?hash, "Transaction submitted");
         Ok(hash)
     }
@@ -429,23 +508,48 @@ where
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn estimate_gas(&self, tx: CallRequest, block: Option<BlockNumberOrTag>) -> RpcResult<String> {
+    async fn estimate_gas(
+        &self,
+        tx: CallRequest,
+        block: Option<BlockNumberOrTag>,
+    ) -> RpcResult<String> {
         let block = block.unwrap_or(BlockNumberOrTag::Latest);
-        let gas = self.state.estimate_gas(&tx, &block).await.map_err(rpc_err)?;
+        let gas = self
+            .state
+            .estimate_gas(&tx, &block)
+            .await
+            .map_err(rpc_err)?;
         debug!(?tx.to, ?block, gas, "eth_estimateGas");
         Ok(format!("0x{:x}", gas))
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn get_block_by_number(&self, block: BlockNumberOrTag, full: bool) -> RpcResult<Option<RpcBlock>> {
-        let result = self.state.get_block_by_number(&block, full).await.map_err(rpc_err)?;
-        debug!(?block, full, found = result.is_some(), "eth_getBlockByNumber");
+    async fn get_block_by_number(
+        &self,
+        block: BlockNumberOrTag,
+        full: bool,
+    ) -> RpcResult<Option<RpcBlock>> {
+        let result = self
+            .state
+            .get_block_by_number(&block, full)
+            .await
+            .map_err(rpc_err)?;
+        debug!(
+            ?block,
+            full,
+            found = result.is_some(),
+            "eth_getBlockByNumber"
+        );
         Ok(result)
     }
 
     #[instrument(skip(self), level = "debug")]
     async fn get_block_by_hash(&self, hash: H256, full: bool) -> RpcResult<Option<RpcBlock>> {
-        let result = self.state.get_block_by_hash(&hash, full).await.map_err(rpc_err)?;
+        let result = self
+            .state
+            .get_block_by_hash(&hash, full)
+            .await
+            .map_err(rpc_err)?;
         debug!(?hash, full, found = result.is_some(), "eth_getBlockByHash");
         Ok(result)
     }
@@ -466,7 +570,11 @@ where
 
     #[instrument(skip(self), level = "debug")]
     async fn get_code(&self, address: Address, block: BlockNumberOrTag) -> RpcResult<String> {
-        let code = self.state.get_code(&address, &block).await.map_err(rpc_err)?;
+        let code = self
+            .state
+            .get_code(&address, &block)
+            .await
+            .map_err(rpc_err)?;
         debug!(?address, ?block, code_len = code.len(), "eth_getCode");
         if code.is_empty() {
             Ok("0x".to_string())
@@ -476,8 +584,17 @@ where
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn get_storage_at(&self, address: Address, position: H256, block: BlockNumberOrTag) -> RpcResult<String> {
-        let value = self.state.get_storage(&address, &position, &block).await.map_err(rpc_err)?;
+    async fn get_storage_at(
+        &self,
+        address: Address,
+        position: H256,
+        block: BlockNumberOrTag,
+    ) -> RpcResult<String> {
+        let value = self
+            .state
+            .get_storage(&address, &position, &block)
+            .await
+            .map_err(rpc_err)?;
         debug!(?address, ?position, ?block, "eth_getStorageAt");
         Ok(format!("0x{}", hex::encode(value.0)))
     }
@@ -503,7 +620,8 @@ where
                 "Query returned {} logs, max is {}",
                 logs.len(),
                 self.max_logs
-            )).into());
+            ))
+            .into());
         }
 
         debug!(count = logs.len(), "eth_getLogs");
@@ -557,15 +675,26 @@ where
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn get_block_transaction_count_by_number(&self, block: BlockNumberOrTag) -> RpcResult<Option<String>> {
-        let count = self.state.get_block_transaction_count(&block).await.map_err(rpc_err)?;
+    async fn get_block_transaction_count_by_number(
+        &self,
+        block: BlockNumberOrTag,
+    ) -> RpcResult<Option<String>> {
+        let count = self
+            .state
+            .get_block_transaction_count(&block)
+            .await
+            .map_err(rpc_err)?;
         debug!(?block, count, "eth_getBlockTransactionCountByNumber");
         Ok(count.map(|c| format!("0x{:x}", c)))
     }
 
     #[instrument(skip(self), level = "debug")]
     async fn get_block_transaction_count_by_hash(&self, hash: H256) -> RpcResult<Option<String>> {
-        let count = self.state.get_block_transaction_count_by_hash(&hash).await.map_err(rpc_err)?;
+        let count = self
+            .state
+            .get_block_transaction_count_by_hash(&hash)
+            .await
+            .map_err(rpc_err)?;
         debug!(?hash, count, "eth_getBlockTransactionCountByHash");
         Ok(count.map(|c| format!("0x{:x}", c)))
     }
@@ -576,8 +705,17 @@ where
         block: BlockNumberOrTag,
         index: HexU64,
     ) -> RpcResult<Option<RpcTransaction>> {
-        let tx = self.state.get_transaction_by_index(&block, index.0).await.map_err(rpc_err)?;
-        debug!(?block, index = index.0, found = tx.is_some(), "eth_getTransactionByBlockNumberAndIndex");
+        let tx = self
+            .state
+            .get_transaction_by_index(&block, index.0)
+            .await
+            .map_err(rpc_err)?;
+        debug!(
+            ?block,
+            index = index.0,
+            found = tx.is_some(),
+            "eth_getTransactionByBlockNumberAndIndex"
+        );
         Ok(tx)
     }
 
@@ -587,8 +725,17 @@ where
         hash: H256,
         index: HexU64,
     ) -> RpcResult<Option<RpcTransaction>> {
-        let tx = self.state.get_transaction_by_hash_and_index(&hash, index.0).await.map_err(rpc_err)?;
-        debug!(?hash, index = index.0, found = tx.is_some(), "eth_getTransactionByBlockHashAndIndex");
+        let tx = self
+            .state
+            .get_transaction_by_hash_and_index(&hash, index.0)
+            .await
+            .map_err(rpc_err)?;
+        debug!(
+            ?hash,
+            index = index.0,
+            found = tx.is_some(),
+            "eth_getTransactionByBlockHashAndIndex"
+        );
         Ok(tx)
     }
 }
@@ -692,4 +839,3 @@ impl NetApiServer for NetApiImpl {
         Ok(format!("0x{:x}", count))
     }
 }
-

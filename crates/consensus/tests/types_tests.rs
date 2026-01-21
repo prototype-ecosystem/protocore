@@ -4,7 +4,7 @@
 //! including validators, validator sets, votes, and finality certificates.
 
 use protocore_consensus::{
-    domains, FinalityCert, NIL_HASH, ValidatorId, ValidatorSet, Validator, Vote, VoteType,
+    domains, FinalityCert, Validator, ValidatorId, ValidatorSet, Vote, VoteType, NIL_HASH,
 };
 use protocore_crypto::bls::BlsPrivateKey;
 

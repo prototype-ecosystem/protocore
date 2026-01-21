@@ -10,11 +10,11 @@ use clap::{Parser, Subcommand, ValueEnum};
 use dialoguer::Confirm;
 use std::path::PathBuf;
 
-use crate::utils::{
-    format_balance, format_timestamp, parse_amount, CliError, CliResult, OutputFormat,
-    RpcClient, TransactionSigner, print_info, print_success, print_warning,
-};
 use crate::default_keystore_dir;
+use crate::utils::{
+    format_balance, format_timestamp, parse_amount, print_info, print_success, print_warning,
+    CliError, CliResult, OutputFormat, RpcClient, TransactionSigner,
+};
 
 /// Governance subcommands
 #[derive(Subcommand, Debug)]
@@ -322,7 +322,9 @@ pub async fn execute(cmd: GovernanceCommands, output_format: OutputFormat) -> Cl
         GovernanceCommands::List(args) => execute_list(args, output_format).await,
         GovernanceCommands::Show(args) => execute_show(args, output_format).await,
         GovernanceCommands::Params(args) => execute_params(args, output_format).await,
-        GovernanceCommands::VotingHistory(args) => execute_voting_history(args, output_format).await,
+        GovernanceCommands::VotingHistory(args) => {
+            execute_voting_history(args, output_format).await
+        }
     }
 }
 
@@ -344,10 +346,14 @@ async fn execute_propose(args: ProposeArgs, output_format: OutputFormat) -> CliR
         }
         ProposalType::SoftwareUpgrade => {
             let height = args.upgrade_height.ok_or_else(|| {
-                CliError::InvalidArgument("--upgrade-height required for software-upgrade".to_string())
+                CliError::InvalidArgument(
+                    "--upgrade-height required for software-upgrade".to_string(),
+                )
             })?;
             let name = args.upgrade_name.ok_or_else(|| {
-                CliError::InvalidArgument("--upgrade-name required for software-upgrade".to_string())
+                CliError::InvalidArgument(
+                    "--upgrade-name required for software-upgrade".to_string(),
+                )
             })?;
             ProposalContent::SoftwareUpgrade { height, name }
         }
@@ -361,9 +367,7 @@ async fn execute_propose(args: ProposeArgs, output_format: OutputFormat) -> CliR
             let amount = parse_amount(&amount)?;
             ProposalContent::CommunitySpend { recipient, amount }
         }
-        ProposalType::Text => {
-            ProposalContent::Text
-        }
+        ProposalType::Text => ProposalContent::Text,
     };
 
     print_info(&format!("Creating {} proposal...", args.proposal_type));
@@ -390,7 +394,9 @@ async fn execute_propose(args: ProposeArgs, output_format: OutputFormat) -> CliR
         }
         println!();
         print_warning("Your deposit will be refunded if the proposal passes or is rejected.");
-        print_warning("If the proposal fails to meet quorum or is vetoed, the deposit may be burned.");
+        print_warning(
+            "If the proposal fails to meet quorum or is vetoed, the deposit may be burned.",
+        );
 
         if !Confirm::new()
             .with_prompt("Submit this proposal?")
@@ -402,7 +408,10 @@ async fn execute_propose(args: ProposeArgs, output_format: OutputFormat) -> CliR
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
     let proposal = ProposalSubmission {
@@ -413,20 +422,20 @@ async fn execute_propose(args: ProposeArgs, output_format: OutputFormat) -> CliR
         content,
     };
 
-    let (tx_hash, proposal_id) = client.send_proposal_transaction(
-        &signer,
-        proposal,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let (tx_hash, proposal_id) = client
+        .send_proposal_transaction(&signer, proposal, args.gas, args.gas_price)
+        .await?;
 
     match output_format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "status": "submitted",
-                "proposal_id": proposal_id,
-                "transaction_hash": tx_hash,
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": "submitted",
+                    "proposal_id": proposal_id,
+                    "transaction_hash": tx_hash,
+                }))?
+            );
         }
         OutputFormat::Text => {
             print_success("Proposal submitted successfully!");
@@ -434,7 +443,10 @@ async fn execute_propose(args: ProposeArgs, output_format: OutputFormat) -> CliR
             println!("  Proposal ID:       {}", proposal_id);
             println!("  Transaction Hash:  {}", tx_hash);
             println!();
-            println!("Use 'protocore governance show {}' to check status.", proposal_id);
+            println!(
+                "Use 'protocore governance show {}' to check status.",
+                proposal_id
+            );
         }
     }
 
@@ -455,7 +467,10 @@ async fn execute_vote(args: VoteArgs, output_format: OutputFormat) -> CliResult<
         )));
     }
 
-    print_info(&format!("Voting {} on proposal {}...", args.vote, args.proposal_id));
+    print_info(&format!(
+        "Voting {} on proposal {}...",
+        args.vote, args.proposal_id
+    ));
 
     if !args.yes {
         println!();
@@ -474,7 +489,10 @@ async fn execute_vote(args: VoteArgs, output_format: OutputFormat) -> CliResult<
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
     let vote_option = match args.vote {
@@ -484,25 +502,33 @@ async fn execute_vote(args: VoteArgs, output_format: OutputFormat) -> CliResult<
         VoteOption::NoWithVeto => 4,
     };
 
-    let tx_hash = client.send_vote_transaction(
-        &signer,
-        args.proposal_id,
-        vote_option,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_vote_transaction(
+            &signer,
+            args.proposal_id,
+            vote_option,
+            args.gas,
+            args.gas_price,
+        )
+        .await?;
 
     match output_format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "status": "submitted",
-                "proposal_id": args.proposal_id,
-                "vote": format!("{}", args.vote),
-                "transaction_hash": tx_hash,
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": "submitted",
+                    "proposal_id": args.proposal_id,
+                    "vote": format!("{}", args.vote),
+                    "transaction_hash": tx_hash,
+                }))?
+            );
         }
         OutputFormat::Text => {
-            print_success(&format!("Vote submitted: {} on proposal {}", args.vote, args.proposal_id));
+            print_success(&format!(
+                "Vote submitted: {} on proposal {}",
+                args.vote, args.proposal_id
+            ));
             println!();
             println!("  Transaction Hash: {}", tx_hash);
         }
@@ -519,7 +545,8 @@ async fn execute_deposit(args: DepositArgs, output_format: OutputFormat) -> CliR
     // Get proposal info
     let proposal = client.get_proposal(args.proposal_id).await?;
 
-    print_info(&format!("Depositing {} to proposal {}...",
+    print_info(&format!(
+        "Depositing {} to proposal {}...",
         format_balance(&amount.to_string()),
         args.proposal_id
     ));
@@ -528,7 +555,10 @@ async fn execute_deposit(args: DepositArgs, output_format: OutputFormat) -> CliR
         println!();
         println!("Proposal: {}", proposal.title);
         println!("Status:   {}", proposal.status);
-        println!("Current Deposit: {}", format_balance(&proposal.total_deposit.to_string()));
+        println!(
+            "Current Deposit: {}",
+            format_balance(&proposal.total_deposit.to_string())
+        );
         println!("Your Deposit:    {}", format_balance(&amount.to_string()));
         println!();
 
@@ -542,28 +572,33 @@ async fn execute_deposit(args: DepositArgs, output_format: OutputFormat) -> CliR
         }
     }
 
-    let keystore = args.keystore.map(PathBuf::from).unwrap_or_else(default_keystore_dir);
+    let keystore = args
+        .keystore
+        .map(PathBuf::from)
+        .unwrap_or_else(default_keystore_dir);
     let signer = TransactionSigner::load(&keystore, &args.from)?;
 
-    let tx_hash = client.send_deposit_transaction(
-        &signer,
-        args.proposal_id,
-        amount,
-        args.gas,
-        args.gas_price,
-    ).await?;
+    let tx_hash = client
+        .send_deposit_transaction(&signer, args.proposal_id, amount, args.gas, args.gas_price)
+        .await?;
 
     match output_format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "status": "submitted",
-                "proposal_id": args.proposal_id,
-                "amount": amount.to_string(),
-                "transaction_hash": tx_hash,
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": "submitted",
+                    "proposal_id": args.proposal_id,
+                    "amount": amount.to_string(),
+                    "transaction_hash": tx_hash,
+                }))?
+            );
         }
         OutputFormat::Text => {
-            print_success(&format!("Deposit submitted to proposal {}", args.proposal_id));
+            print_success(&format!(
+                "Deposit submitted to proposal {}",
+                args.proposal_id
+            ));
             println!();
             println!("  Transaction Hash: {}", tx_hash);
         }
@@ -579,11 +614,13 @@ async fn execute_list(args: ListArgs, output_format: OutputFormat) -> CliResult<
     print_info("Querying proposals...");
 
     let status_filter = args.status.map(|s| format!("{:?}", s));
-    let proposals = client.get_proposals(
-        status_filter.as_deref(),
-        args.proposer.as_deref(),
-        args.limit,
-    ).await?;
+    let proposals = client
+        .get_proposals(
+            status_filter.as_deref(),
+            args.proposer.as_deref(),
+            args.limit,
+        )
+        .await?;
 
     match output_format {
         OutputFormat::Json => {
@@ -595,12 +632,15 @@ async fn execute_list(args: ListArgs, output_format: OutputFormat) -> CliResult<
             } else {
                 println!("Proposals ({} found)", proposals.len());
                 println!();
-                println!("{:<6} {:<40} {:<20} {:<16}",
-                    "ID", "TITLE", "TYPE", "STATUS");
+                println!(
+                    "{:<6} {:<40} {:<20} {:<16}",
+                    "ID", "TITLE", "TYPE", "STATUS"
+                );
                 println!("{}", "-".repeat(84));
 
                 for p in &proposals {
-                    println!("{:<6} {:<40} {:<20} {:<16}",
+                    println!(
+                        "{:<6} {:<40} {:<20} {:<16}",
                         p.id,
                         truncate_text(&p.title, 38),
                         truncate_text(&p.proposal_type, 18),
@@ -648,7 +688,8 @@ async fn execute_show(args: ShowArgs, output_format: OutputFormat) -> CliResult<
             println!("Description:");
             println!("{}", wrap_text(&proposal.description, 80));
             println!();
-            println!("Deposit:     {} / {} (min)",
+            println!(
+                "Deposit:     {} / {} (min)",
                 format_balance(&proposal.total_deposit.to_string()),
                 format_balance(&proposal.min_deposit.to_string())
             );
@@ -661,7 +702,10 @@ async fn execute_show(args: ShowArgs, output_format: OutputFormat) -> CliResult<
             }
 
             println!("Timeline:");
-            println!("  Submit Time:        {}", format_timestamp(proposal.submit_time));
+            println!(
+                "  Submit Time:        {}",
+                format_timestamp(proposal.submit_time)
+            );
             if let Some(end) = proposal.deposit_end_time {
                 println!("  Deposit End:        {}", format_timestamp(end));
             }
@@ -674,10 +718,22 @@ async fn execute_show(args: ShowArgs, output_format: OutputFormat) -> CliResult<
 
             println!();
             println!("Voting Results:");
-            println!("  Yes:          {} ({:.1}%)", proposal.yes_votes, proposal.yes_percentage);
-            println!("  No:           {} ({:.1}%)", proposal.no_votes, proposal.no_percentage);
-            println!("  Abstain:      {} ({:.1}%)", proposal.abstain_votes, proposal.abstain_percentage);
-            println!("  No w/ Veto:   {} ({:.1}%)", proposal.veto_votes, proposal.veto_percentage);
+            println!(
+                "  Yes:          {} ({:.1}%)",
+                proposal.yes_votes, proposal.yes_percentage
+            );
+            println!(
+                "  No:           {} ({:.1}%)",
+                proposal.no_votes, proposal.no_percentage
+            );
+            println!(
+                "  Abstain:      {} ({:.1}%)",
+                proposal.abstain_votes, proposal.abstain_percentage
+            );
+            println!(
+                "  No w/ Veto:   {} ({:.1}%)",
+                proposal.veto_votes, proposal.veto_percentage
+            );
             println!("  Turnout:      {:.1}%", proposal.turnout_percentage);
 
             if let Some(v) = votes {
@@ -686,7 +742,8 @@ async fn execute_show(args: ShowArgs, output_format: OutputFormat) -> CliResult<
                 println!("{:<44} {:<12} {:<20}", "VOTER", "VOTE", "VOTING POWER");
                 println!("{}", "-".repeat(78));
                 for vote in v.iter().take(20) {
-                    println!("{:<44} {:<12} {:<20}",
+                    println!(
+                        "{:<44} {:<12} {:<20}",
                         vote.voter,
                         vote.option,
                         format_balance(&vote.voting_power.to_string())
@@ -719,20 +776,51 @@ async fn execute_params(args: ParamsArgs, output_format: OutputFormat) -> CliRes
             println!("=====================");
             println!();
             println!("Deposit:");
-            println!("  Minimum Deposit:    {}", format_balance(&params.min_deposit.to_string()));
-            println!("  Deposit Period:     {} blocks", params.deposit_period_blocks);
+            println!(
+                "  Minimum Deposit:    {}",
+                format_balance(&params.min_deposit.to_string())
+            );
+            println!(
+                "  Deposit Period:     {} blocks",
+                params.deposit_period_blocks
+            );
             println!();
             println!("Voting:");
-            println!("  Voting Period:      {} blocks", params.voting_period_blocks);
-            println!("  Quorum:             {:.1}%", params.quorum_bps as f64 / 100.0);
-            println!("  Threshold:          {:.1}%", params.threshold_bps as f64 / 100.0);
-            println!("  Veto Threshold:     {:.1}%", params.veto_threshold_bps as f64 / 100.0);
+            println!(
+                "  Voting Period:      {} blocks",
+                params.voting_period_blocks
+            );
+            println!(
+                "  Quorum:             {:.1}%",
+                params.quorum_bps as f64 / 100.0
+            );
+            println!(
+                "  Threshold:          {:.1}%",
+                params.threshold_bps as f64 / 100.0
+            );
+            println!(
+                "  Veto Threshold:     {:.1}%",
+                params.veto_threshold_bps as f64 / 100.0
+            );
             println!();
             println!("Other:");
-            println!("  Expedited Enabled:  {}", if params.expedited_enabled { "Yes" } else { "No" });
+            println!(
+                "  Expedited Enabled:  {}",
+                if params.expedited_enabled {
+                    "Yes"
+                } else {
+                    "No"
+                }
+            );
             if params.expedited_enabled {
-                println!("  Expedited Quorum:   {:.1}%", params.expedited_quorum_bps as f64 / 100.0);
-                println!("  Expedited Threshold: {:.1}%", params.expedited_threshold_bps as f64 / 100.0);
+                println!(
+                    "  Expedited Quorum:   {:.1}%",
+                    params.expedited_quorum_bps as f64 / 100.0
+                );
+                println!(
+                    "  Expedited Threshold: {:.1}%",
+                    params.expedited_threshold_bps as f64 / 100.0
+                );
             }
         }
     }
@@ -741,10 +829,16 @@ async fn execute_params(args: ParamsArgs, output_format: OutputFormat) -> CliRes
 }
 
 /// Execute voting history command
-async fn execute_voting_history(args: VotingHistoryArgs, output_format: OutputFormat) -> CliResult<()> {
+async fn execute_voting_history(
+    args: VotingHistoryArgs,
+    output_format: OutputFormat,
+) -> CliResult<()> {
     let client = RpcClient::new(&args.rpc)?;
 
-    print_info(&format!("Querying voting history for {}...", &args.address[..10]));
+    print_info(&format!(
+        "Querying voting history for {}...",
+        &args.address[..10]
+    ));
 
     let history = client.get_voting_history(&args.address, args.limit).await?;
 
@@ -758,12 +852,15 @@ async fn execute_voting_history(args: VotingHistoryArgs, output_format: OutputFo
             } else {
                 println!("Voting History for {}", args.address);
                 println!();
-                println!("{:<8} {:<40} {:<12} {:<16}",
-                    "PROP ID", "TITLE", "VOTE", "TIMESTAMP");
+                println!(
+                    "{:<8} {:<40} {:<12} {:<16}",
+                    "PROP ID", "TITLE", "VOTE", "TIMESTAMP"
+                );
                 println!("{}", "-".repeat(78));
 
                 for vote in &history {
-                    println!("{:<8} {:<40} {:<12} {:<16}",
+                    println!(
+                        "{:<8} {:<40} {:<12} {:<16}",
                         vote.proposal_id,
                         truncate_text(&vote.proposal_title, 38),
                         vote.option,
@@ -889,4 +986,3 @@ pub struct VotingHistoryEntry {
     pub option: String,
     pub timestamp: u64,
 }
-

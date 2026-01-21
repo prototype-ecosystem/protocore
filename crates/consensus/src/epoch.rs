@@ -135,7 +135,7 @@ impl EpochConfig {
     ///
     /// Result with the configuration or an error if the length is invalid
     pub fn new(epoch_length: u64) -> EpochResult<Self> {
-        if epoch_length < MIN_EPOCH_LENGTH || epoch_length > MAX_EPOCH_LENGTH {
+        if !(MIN_EPOCH_LENGTH..=MAX_EPOCH_LENGTH).contains(&epoch_length) {
             return Err(EpochError::InvalidEpochLength {
                 length: epoch_length,
                 min: MIN_EPOCH_LENGTH,
@@ -361,19 +361,19 @@ pub fn compute_validator_set_hash(validator_set: &ValidatorSet) -> Hash {
     let mut hasher = Keccak256::new();
 
     // Include validator count
-    hasher.update(&(validator_set.len() as u64).to_le_bytes());
+    hasher.update((validator_set.len() as u64).to_le_bytes());
 
     // Include total stake for quorum verification
-    hasher.update(&validator_set.total_stake.to_le_bytes());
+    hasher.update(validator_set.total_stake.to_le_bytes());
 
     // Include each validator's data (validators are already sorted by id)
     for validator in &validator_set.validators {
-        hasher.update(&validator.id.to_le_bytes());
-        hasher.update(&validator.pubkey.to_bytes());
-        hasher.update(&validator.address);
-        hasher.update(&validator.stake.to_le_bytes());
-        hasher.update(&validator.commission.to_le_bytes());
-        hasher.update(&[validator.active as u8]);
+        hasher.update(validator.id.to_le_bytes());
+        hasher.update(validator.pubkey.to_bytes());
+        hasher.update(validator.address);
+        hasher.update(validator.stake.to_le_bytes());
+        hasher.update(validator.commission.to_le_bytes());
+        hasher.update([validator.active as u8]);
     }
 
     let result = hasher.finalize();
@@ -542,7 +542,11 @@ impl EpochManager {
     /// # Returns
     ///
     /// Ok(true) on successful transition, Err on failure
-    fn transition_to_epoch(&mut self, new_epoch: EpochNumber, start_height: u64) -> EpochResult<bool> {
+    fn transition_to_epoch(
+        &mut self,
+        new_epoch: EpochNumber,
+        start_height: u64,
+    ) -> EpochResult<bool> {
         info!(
             old_epoch = self.current_epoch,
             new_epoch = new_epoch,
@@ -571,10 +575,8 @@ impl EpochManager {
                     new_epoch = new_epoch,
                     "No pending validator set, carrying over from previous epoch"
                 );
-                let prev_set = self
-                    .validator_set_for_epoch(self.current_epoch)?
-                    .clone();
-                prev_set
+
+                self.validator_set_for_epoch(self.current_epoch)?.clone()
             }
         };
 
@@ -931,7 +933,10 @@ mod tests {
         // Different sets should have different hashes
         let vs2 = make_test_validator_set(5);
         let hash3 = compute_validator_set_hash(&vs2);
-        assert_ne!(hash1, hash3, "Different validator counts should produce different hashes");
+        assert_ne!(
+            hash1, hash3,
+            "Different validator counts should produce different hashes"
+        );
 
         // Cloned set should have same hash
         let vs1_clone = vs1.clone();

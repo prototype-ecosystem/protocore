@@ -7,8 +7,8 @@
 //! - Aggregated signature creation
 
 use protocore_consensus::{
-    HeightVoteSet, NIL_HASH, ValidatorId, ValidatorSet, Validator, Vote, VoteSet, VoteSetError,
-    VoteType,
+    HeightVoteSet, Validator, ValidatorId, ValidatorSet, Vote, VoteSet, VoteSetError, VoteType,
+    NIL_HASH,
 };
 use protocore_crypto::bls::BlsPrivateKey;
 
@@ -140,8 +140,7 @@ fn test_signers_bitmap() {
 
     // Validators 0, 2, 3 vote for block
     for i in [0, 2, 3] {
-        let vote =
-            create_signed_vote(VoteType::Precommit, 1, 0, block_hash, i, &keys[i as usize]);
+        let vote = create_signed_vote(VoteType::Precommit, 1, 0, block_hash, i, &keys[i as usize]);
         vote_set.add_vote(vote, &vs).unwrap();
     }
 

@@ -121,7 +121,12 @@ pub struct MerkleProof {
 
 impl MerkleProof {
     /// Create a new Merkle proof
-    pub fn new(key: Vec<u8>, value: Option<Vec<u8>>, proof: Vec<MerkleProofNode>, root: Hash) -> Self {
+    pub fn new(
+        key: Vec<u8>,
+        value: Option<Vec<u8>>,
+        proof: Vec<MerkleProofNode>,
+        root: Hash,
+    ) -> Self {
         Self {
             key,
             value,
@@ -329,7 +334,9 @@ impl AccountState {
         let (list_data, _) = decode_rlp_list(data)?;
 
         if list_data.len() < 4 {
-            return Err(Error::InvalidProof("invalid account RLP: too few elements".into()));
+            return Err(Error::InvalidProof(
+                "invalid account RLP: too few elements".into(),
+            ));
         }
 
         let nonce = decode_compact_u64(&list_data[0])?;
@@ -456,7 +463,7 @@ impl TransactionProof {
 }
 
 /// Transaction receipt data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TransactionReceipt {
     /// Transaction hash
     pub tx_hash: Hash,
@@ -476,22 +483,6 @@ pub struct TransactionReceipt {
     pub contract_address: Option<Address>,
     /// Logs emitted
     pub logs: Vec<Log>,
-}
-
-impl Default for TransactionReceipt {
-    fn default() -> Self {
-        Self {
-            tx_hash: [0u8; 32],
-            tx_index: 0,
-            block_hash: [0u8; 32],
-            block_number: 0,
-            success: false,
-            gas_used: 0,
-            cumulative_gas_used: 0,
-            contract_address: None,
-            logs: Vec::new(),
-        }
-    }
 }
 
 /// Event log emitted by a transaction
@@ -565,7 +556,9 @@ impl ProofVerifier {
         }
 
         if !proof.verify() {
-            return Err(Error::InvalidProof("state proof verification failed".into()));
+            return Err(Error::InvalidProof(
+                "state proof verification failed".into(),
+            ));
         }
 
         Ok(true)
@@ -679,8 +672,11 @@ impl ProofVerifier {
         receipts_root: &Hash,
     ) -> Result<TransactionReceipt> {
         // Verify the Merkle proof
-        let computed_root =
-            self.compute_mpt_root(&proof.key(), &Some(proof.receipt_data.clone()), &proof.proof)?;
+        let computed_root = self.compute_mpt_root(
+            &proof.key(),
+            &Some(proof.receipt_data.clone()),
+            &proof.proof,
+        )?;
 
         if computed_root != *receipts_root {
             return Err(Error::ProofVerificationFailed {
@@ -723,10 +719,7 @@ impl ProofVerifier {
             current = keccak256_concat(&[node.as_slice(), &current]);
         }
 
-        trace!(
-            "Computed MPT root: 0x{}",
-            hex::encode(current)
-        );
+        trace!("Computed MPT root: 0x{}", hex::encode(current));
 
         Ok(current)
     }
@@ -864,7 +857,7 @@ fn decode_rlp_list(data: &[u8]) -> Result<(Vec<Vec<u8>>, usize)> {
     let first = data[0];
 
     // List with length < 56
-    if first >= 0xc0 && first <= 0xf7 {
+    if (0xc0..=0xf7).contains(&first) {
         let list_len = (first - 0xc0) as usize;
         if data.len() < 1 + list_len {
             return Err(Error::InvalidProof("RLP list too short".into()));
@@ -998,4 +991,3 @@ fn decode_receipt(data: &[u8], tx_hash: Hash, tx_index: u64) -> Result<Transacti
         ..Default::default()
     })
 }
-

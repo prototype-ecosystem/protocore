@@ -9,7 +9,6 @@
 //! - Handling block rewards and commission
 
 use anyhow::{Context, Result};
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
@@ -18,17 +17,14 @@ use tracing::{debug, error, info, warn};
 
 use protocore_config::Config;
 use protocore_consensus::{
-    BlockBuilder as ConsensusBlockBuilder, BlockValidator as ConsensusBlockValidator,
-    CommittedBlock, ConsensusEngine, ConsensusMessage, FinalityCert, Proposal, TimeoutConfig,
-    TimeoutInfo, Validator as ConsensusValidator, ValidatorSet as ConsensusValidatorSet,
-    Vote, VoteType,
+    CommittedBlock, ConsensusEngine, ConsensusMessage, TimeoutConfig, TimeoutInfo,
+    Validator as ConsensusValidator, ValidatorSet as ConsensusValidatorSet, Vote, VoteType,
 };
 use protocore_crypto::{BlsPrivateKey, BlsPublicKey, BlsSignature};
-use protocore_p2p::{GossipMessage, NetworkHandle};
-use protocore_storage::{Database, StateDB};
-use protocore_types::{Address, Block, BlockHeader, H256};
+use protocore_p2p::GossipMessage;
+use protocore_types::{Address, Block};
 
-use crate::node::{Node, NodeBlockBuilder, NodeBlockValidator, NodeEvent, NodeStatus};
+use crate::node::{Node, NodeBlockBuilder, NodeBlockValidator};
 
 /// Validator key pair for consensus participation
 #[derive(Clone)]
@@ -48,17 +44,18 @@ impl ValidatorKeys {
             .with_context(|| format!("Failed to read validator key from {:?}", path))?;
 
         // Parse the key file (JSON format)
-        let key_data: ValidatorKeyFile = serde_json::from_slice(&key_bytes)
-            .context("Failed to parse validator key file")?;
+        let key_data: ValidatorKeyFile =
+            serde_json::from_slice(&key_bytes).context("Failed to parse validator key file")?;
 
         let key_bytes = hex::decode(&key_data.bls_private_key)?;
-        let key_array: [u8; 32] = key_bytes
-            .try_into()
-            .map_err(|v: Vec<u8>| anyhow::anyhow!("Expected 32 bytes for BLS key, got {}", v.len()))?;
+        let key_array: [u8; 32] = key_bytes.try_into().map_err(|v: Vec<u8>| {
+            anyhow::anyhow!("Expected 32 bytes for BLS key, got {}", v.len())
+        })?;
         let bls_private_key = BlsPrivateKey::from_bytes(&key_array)?;
         let bls_public_key = bls_private_key.public_key();
 
-        let address = Address::from_slice(&hex::decode(&key_data.address.trim_start_matches("0x"))?)?;
+        let address =
+            Address::from_slice(&hex::decode(key_data.address.trim_start_matches("0x"))?)?;
 
         Ok(Self {
             bls_private_key,
@@ -161,8 +158,7 @@ impl ValidatorNode {
         info!(key_path = ?key_path, "Loading validator keys");
 
         // Load validator keys
-        let keys = ValidatorKeys::load(key_path)
-            .context("Failed to load validator keys")?;
+        let keys = ValidatorKeys::load(key_path).context("Failed to load validator keys")?;
 
         info!(
             address = %format!("0x{}", hex::encode(keys.address.as_bytes())),
@@ -201,9 +197,7 @@ impl ValidatorNode {
         self.check_validator_status().await?;
 
         if !self.is_active_validator {
-            warn!(
-                "Validator is not in the active set. Running as observer until activated."
-            );
+            warn!("Validator is not in the active set. Running as observer until activated.");
         } else {
             info!(
                 validator_id = self.validator_id,
@@ -304,8 +298,7 @@ impl ValidatorNode {
             address.copy_from_slice(&address_bytes);
 
             // Parse stake from string to u128
-            let stake: u128 = genesis_val.stake.parse()
-                .context("Invalid stake value")?;
+            let stake: u128 = genesis_val.stake.parse().context("Invalid stake value")?;
 
             validators.push(ConsensusValidator::new(
                 i as u64,
@@ -371,13 +364,15 @@ impl ValidatorNode {
         let database = self.node.database();
 
         // Try to get the latest block height from metadata
-        if let Some(height_bytes) = database.get_metadata(b"latest_height")
+        if let Some(height_bytes) = database
+            .get_metadata(b"latest_height")
             .map_err(|e| anyhow::anyhow!("Failed to get latest height: {}", e))?
         {
             if height_bytes.len() >= 8 {
                 let height = u64::from_le_bytes(height_bytes[..8].try_into().unwrap());
                 // Try to get the block hash for this height
-                if let Some(hash_bytes) = database.get_metadata(&format!("block_hash_{}", height).into_bytes())
+                if let Some(hash_bytes) = database
+                    .get_metadata(&format!("block_hash_{}", height).into_bytes())
                     .map_err(|e| anyhow::anyhow!("Failed to get block hash: {}", e))?
                 {
                     if hash_bytes.len() >= 32 {
@@ -396,7 +391,10 @@ impl ValidatorNode {
 
     /// Spawn background tasks for consensus message handling
     fn spawn_consensus_tasks(&mut self) {
-        let engine = self.consensus.clone().expect("Consensus engine must be initialized");
+        let engine = self
+            .consensus
+            .clone()
+            .expect("Consensus engine must be initialized");
 
         // Task 1: Handle incoming consensus messages from network
         if let Some(mut rx) = self.consensus_msg_rx.take() {
@@ -405,7 +403,11 @@ impl ValidatorNode {
                 while let Some(msg) = rx.recv().await {
                     match msg {
                         GossipMessage::Proposal(proposal) => {
-                            debug!(height = proposal.height, round = proposal.round, "Processing proposal");
+                            debug!(
+                                height = proposal.height,
+                                round = proposal.round,
+                                "Processing proposal"
+                            );
                             eng.on_proposal(proposal).await;
                         }
                         GossipMessage::Vote(vote) => {
@@ -530,7 +532,11 @@ impl ValidatorNode {
                         error!(error = %e, "Failed to store block hash mapping");
                     }
 
-                    info!(height = height, txs = tx_count, "Block persisted to database");
+                    info!(
+                        height = height,
+                        txs = tx_count,
+                        "Block persisted to database"
+                    );
 
                     // Broadcast committed block event
                     let _ = committed_tx.send(committed.clone());

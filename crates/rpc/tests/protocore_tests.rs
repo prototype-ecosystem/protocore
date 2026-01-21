@@ -1,7 +1,7 @@
 //! Tests for Proto Core RPC methods
 
 use protocore_rpc::protocore::{ProposalStatus, ValidatorInfo};
-use protocore_rpc::types::{Address, HexBytes, HexU64, HexU256};
+use protocore_rpc::types::{Address, HexBytes, HexU256, HexU64};
 
 #[test]
 fn test_proposal_status_serde() {

@@ -33,7 +33,7 @@
 use alloy_primitives::{Address, Bytes, B256, U256};
 use protocore_consensus::evidence::{EquivocationEvidence, EVIDENCE_MAX_AGE_BLOCKS};
 use protocore_consensus::types::{ValidatorId, ValidatorSet, Vote, VoteType};
-use protocore_crypto::bls::{BlsPublicKey, BlsSignature};
+use protocore_crypto::bls::BlsSignature;
 use revm::Database;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
@@ -252,7 +252,9 @@ impl SlashingPrecompile {
         let mut state = Self::load_state(db)?;
 
         // Check rate limit (DoS protection)
-        state.rate_limiter.check_and_increment(block_number, reporter)?;
+        state
+            .rate_limiter
+            .check_and_increment(block_number, reporter)?;
 
         // Decode the evidence from ABI-encoded data
         let evidence = Self::decode_evidence(data)?;
@@ -269,9 +271,10 @@ impl SlashingPrecompile {
         Self::check_evidence_age(&evidence, block_number)?;
 
         // Get validator set for signature verification
-        let validator_set = state.validator_set.clone().ok_or_else(|| {
-            PrecompileError::InvalidInput("validator set not available".into())
-        })?;
+        let validator_set = state
+            .validator_set
+            .clone()
+            .ok_or_else(|| PrecompileError::InvalidInput("validator set not available".into()))?;
 
         // Validate the evidence (verifies signatures)
         evidence.validate(&validator_set).map_err(|e| {
@@ -375,7 +378,9 @@ impl SlashingPrecompile {
 
         // Fallback: decode manually for backward compatibility
         if data.len() < 64 {
-            return Err(PrecompileError::InvalidInput("evidence data too short".into()));
+            return Err(PrecompileError::InvalidInput(
+                "evidence data too short".into(),
+            ));
         }
 
         // Decode vote offsets
@@ -576,9 +581,7 @@ impl SlashingPrecompile {
     }
 
     /// Load slashing state from storage
-    fn load_state<DB: Database>(
-        _db: &StateAdapter<DB>,
-    ) -> Result<SlashingState, PrecompileError>
+    fn load_state<DB: Database>(_db: &StateAdapter<DB>) -> Result<SlashingState, PrecompileError>
     where
         DB::Error: std::fmt::Debug,
     {
@@ -668,9 +671,15 @@ mod tests {
 
     #[test]
     fn test_evidence_type_conversion() {
-        assert_eq!(EvidenceType::try_from(0).unwrap(), EvidenceType::DoubleSigning);
+        assert_eq!(
+            EvidenceType::try_from(0).unwrap(),
+            EvidenceType::DoubleSigning
+        );
         assert_eq!(EvidenceType::try_from(1).unwrap(), EvidenceType::Downtime);
-        assert_eq!(EvidenceType::try_from(2).unwrap(), EvidenceType::InvalidBlock);
+        assert_eq!(
+            EvidenceType::try_from(2).unwrap(),
+            EvidenceType::InvalidBlock
+        );
         assert_eq!(EvidenceType::try_from(3).unwrap(), EvidenceType::Censorship);
         assert!(EvidenceType::try_from(4).is_err());
     }

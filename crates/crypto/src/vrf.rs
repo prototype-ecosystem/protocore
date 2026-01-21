@@ -35,8 +35,8 @@ use curve25519_dalek::{
     scalar::Scalar,
     traits::VartimeMultiscalarMul,
 };
-use sha2::{Digest, Sha512};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha512};
 
 /// VRF secret key (same as validator's signing key)
 ///
@@ -62,7 +62,7 @@ pub struct VrfPublicKey {
 ///
 /// The proof contains all information needed to verify that a VRF output
 /// was correctly computed for a given input and public key.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct VrfProof {
     /// Gamma point (compressed)
     pub gamma: [u8; 32],
@@ -70,16 +70,6 @@ pub struct VrfProof {
     pub c: [u8; 32],
     /// Response scalar
     pub s: [u8; 32],
-}
-
-impl Default for VrfProof {
-    fn default() -> Self {
-        Self {
-            gamma: [0u8; 32],
-            c: [0u8; 32],
-            s: [0u8; 32],
-        }
-    }
 }
 
 /// VRF output (the random value)
@@ -172,7 +162,7 @@ impl VrfSecretKey {
         let h = hash_to_curve(input);
 
         // Gamma = secret * H
-        let gamma = &self.scalar * &h;
+        let gamma = self.scalar * h;
 
         // Generate deterministic nonce k
         let k = self.generate_nonce(input);
@@ -181,7 +171,7 @@ impl VrfSecretKey {
         let u = &k * ED25519_BASEPOINT_POINT;
 
         // V = k * H
-        let v = &k * &h;
+        let v = k * h;
 
         // Challenge c = hash(G, H, public, Gamma, U, V)
         let c = self.compute_challenge(&h, &gamma, &u, &v);
@@ -228,7 +218,7 @@ impl VrfSecretKey {
         hasher.update(b"VRF_challenge");
         hasher.update(ED25519_BASEPOINT_POINT.compress().as_bytes());
         hasher.update(h.compress().as_bytes());
-        hasher.update(&self.public.compressed);
+        hasher.update(self.public.compressed);
         hasher.update(gamma.compress().as_bytes());
         hasher.update(u.compress().as_bytes());
         hasher.update(v.compress().as_bytes());
@@ -274,8 +264,16 @@ impl VrfPublicKey {
         let s = Scalar::from_canonical_bytes(s_bytes);
 
         // Handle Option return from from_canonical_bytes
-        let c = if c.is_some().into() { c.unwrap() } else { return None; };
-        let s = if s.is_some().into() { s.unwrap() } else { return None; };
+        let c = if c.is_some().into() {
+            c.unwrap()
+        } else {
+            return None;
+        };
+        let s = if s.is_some().into() {
+            s.unwrap()
+        } else {
+            return None;
+        };
 
         // Hash input to curve
         let h = hash_to_curve(input);
@@ -310,7 +308,7 @@ impl VrfPublicKey {
         hasher.update(b"VRF_challenge");
         hasher.update(ED25519_BASEPOINT_POINT.compress().as_bytes());
         hasher.update(h.compress().as_bytes());
-        hasher.update(&self.compressed);
+        hasher.update(self.compressed);
         hasher.update(gamma.compress().as_bytes());
         hasher.update(u.compress().as_bytes());
         hasher.update(v.compress().as_bytes());
@@ -343,8 +341,7 @@ impl<'de> Deserialize<'de> for VrfPublicKey {
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
 
-        VrfPublicKey::from_bytes(&arr)
-            .ok_or_else(|| D::Error::custom("Invalid VRF public key"))
+        VrfPublicKey::from_bytes(&arr).ok_or_else(|| D::Error::custom("Invalid VRF public key"))
     }
 }
 
@@ -373,4 +370,3 @@ fn hash_point(point: &EdwardsPoint) -> [u8; 64] {
     let hash = hasher.finalize();
     hash.into()
 }
-

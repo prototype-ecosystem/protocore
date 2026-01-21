@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
+use rand::Rng;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{debug, trace, warn};
@@ -86,8 +87,8 @@ impl TimeoutMetrics {
     pub fn record_commit(&mut self, rounds_taken: u64) {
         self.heights_committed += 1;
         // Update rolling average
-        let total_rounds = self.avg_rounds_per_height * (self.heights_committed - 1) as f64
-            + rounds_taken as f64;
+        let total_rounds =
+            self.avg_rounds_per_height * (self.heights_committed - 1) as f64 + rounds_taken as f64;
         self.avg_rounds_per_height = total_rounds / self.heights_committed as f64;
     }
 
@@ -97,8 +98,7 @@ impl TimeoutMetrics {
         if self.estimated_latency_ms == 0 {
             self.estimated_latency_ms = latency_ms;
         } else {
-            self.estimated_latency_ms =
-                (self.estimated_latency_ms * 4 + latency_ms) / 5;
+            self.estimated_latency_ms = (self.estimated_latency_ms * 4 + latency_ms) / 5;
         }
     }
 
@@ -160,6 +160,11 @@ pub struct TimeoutConfig {
     /// Adaptive timeout multiplier (1.0 = no adjustment)
     /// Can be adjusted based on network conditions
     pub adaptive_multiplier: f64,
+
+    /// Random jitter percentage (0.0 to 1.0)
+    /// Adds randomness to prevent timing attacks and reduce synchronization.
+    /// A value of 0.15 means timeouts can vary by up to 15%.
+    pub jitter_percent: f64,
 }
 
 impl Default for TimeoutConfig {
@@ -174,6 +179,7 @@ impl Default for TimeoutConfig {
             max_timeout: Duration::from_secs(60),
             backoff_mode: BackoffMode::Linear,
             adaptive_multiplier: 1.0,
+            jitter_percent: 0.15, // 15% jitter for DoS protection
         }
     }
 }
@@ -198,6 +204,7 @@ impl TimeoutConfig {
             max_timeout: Duration::from_secs(60),
             backoff_mode: BackoffMode::Linear,
             adaptive_multiplier: 1.0,
+            jitter_percent: 0.15, // 15% jitter for DoS protection
         }
     }
 
@@ -216,6 +223,7 @@ impl TimeoutConfig {
             max_timeout: Duration::from_secs(60),
             backoff_mode: BackoffMode::exponential(),
             adaptive_multiplier: 1.0,
+            jitter_percent: 0.15, // 15% jitter for DoS protection
         }
     }
 
@@ -231,6 +239,7 @@ impl TimeoutConfig {
             max_timeout: Duration::from_secs(5),
             backoff_mode: BackoffMode::Linear,
             adaptive_multiplier: 1.0,
+            jitter_percent: 0.10, // 10% jitter for testing
         }
     }
 
@@ -243,6 +252,18 @@ impl TimeoutConfig {
     /// Set the adaptive multiplier
     pub fn with_adaptive_multiplier(mut self, multiplier: f64) -> Self {
         self.adaptive_multiplier = multiplier.max(0.5).min(5.0); // Clamp to reasonable range
+        self
+    }
+
+    /// Set the jitter percentage for DoS protection
+    ///
+    /// # Arguments
+    /// * `percent` - Jitter as a fraction (e.g., 0.15 for 15%)
+    ///
+    /// Jitter adds unpredictability to timeout timing, making it harder
+    /// for attackers to time network partitions or eclipse attacks.
+    pub fn with_jitter(mut self, percent: f64) -> Self {
+        self.jitter_percent = percent.max(0.0).min(0.5); // Clamp to 0-50%
         self
     }
 
@@ -314,8 +335,19 @@ impl TimeoutConfig {
             Duration::from_secs_f64(raw_timeout.as_secs_f64() * self.adaptive_multiplier)
         };
 
+        // Apply random jitter for DoS protection
+        // Jitter adds unpredictability to prevent attackers from timing attacks
+        let with_jitter = if self.jitter_percent > 0.0 {
+            let mut rng = rand::thread_rng();
+            // Generate jitter in range [1.0, 1.0 + jitter_percent]
+            let jitter_multiplier = 1.0 + rng.gen::<f64>() * self.jitter_percent;
+            Duration::from_secs_f64(adjusted.as_secs_f64() * jitter_multiplier)
+        } else {
+            adjusted
+        };
+
         // Cap at max_timeout
-        adjusted.min(self.max_timeout)
+        with_jitter.min(self.max_timeout)
     }
 }
 
@@ -563,7 +595,8 @@ mod tests {
 
     #[test]
     fn test_linear_backoff() {
-        let config = TimeoutConfig::default();
+        // Disable jitter for deterministic test results
+        let config = TimeoutConfig::default().with_jitter(0.0);
 
         // Round 0: base = 1000ms
         assert_eq!(config.propose(0), Duration::from_millis(1000));
@@ -580,7 +613,8 @@ mod tests {
 
     #[test]
     fn test_exponential_backoff() {
-        let config = TimeoutConfig::partial_synchrony();
+        // Disable jitter for deterministic test results
+        let config = TimeoutConfig::partial_synchrony().with_jitter(0.0);
 
         // Round 0: base * 2^0 = 1000ms
         assert_eq!(config.propose(0), Duration::from_millis(1000));
@@ -606,7 +640,9 @@ mod tests {
 
     #[test]
     fn test_adaptive_multiplier() {
+        // Disable jitter for deterministic test results
         let config = TimeoutConfig::default()
+            .with_jitter(0.0)
             .with_adaptive_multiplier(2.0);
 
         // Round 0 with 2x multiplier: 2000ms
@@ -619,13 +655,11 @@ mod tests {
     #[test]
     fn test_adaptive_multiplier_clamping() {
         // Multiplier too low is clamped to 0.5
-        let config = TimeoutConfig::default()
-            .with_adaptive_multiplier(0.1);
+        let config = TimeoutConfig::default().with_adaptive_multiplier(0.1);
         assert_eq!(config.adaptive_multiplier, 0.5);
 
         // Multiplier too high is clamped to 5.0
-        let config = TimeoutConfig::default()
-            .with_adaptive_multiplier(10.0);
+        let config = TimeoutConfig::default().with_adaptive_multiplier(10.0);
         assert_eq!(config.adaptive_multiplier, 5.0);
     }
 
@@ -641,6 +675,7 @@ mod tests {
             max_timeout: Duration::from_secs(30),
             backoff_mode: BackoffMode::Linear,
             adaptive_multiplier: 1.0,
+            jitter_percent: 0.0, // No jitter for this test
         };
 
         // Round 5 would be 60s but capped at 30s
@@ -697,6 +732,9 @@ mod tests {
         assert!(matches!(exp, BackoffMode::Exponential { max_exponent: 6 }));
 
         let exp_custom = BackoffMode::exponential_with_cap(4);
-        assert!(matches!(exp_custom, BackoffMode::Exponential { max_exponent: 4 }));
+        assert!(matches!(
+            exp_custom,
+            BackoffMode::Exponential { max_exponent: 4 }
+        ));
     }
 }

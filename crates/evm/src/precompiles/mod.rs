@@ -211,7 +211,11 @@ impl PrecompileOutput {
     }
 
     /// Create output with logs
-    pub fn with_logs(output: impl Into<Bytes>, gas_used: u64, logs: Vec<revm::primitives::Log>) -> Self {
+    pub fn with_logs(
+        output: impl Into<Bytes>,
+        gas_used: u64,
+        logs: Vec<revm::primitives::Log>,
+    ) -> Self {
         Self {
             output: output.into(),
             gas_used,

@@ -5,11 +5,10 @@
 
 use clap::Parser;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::broadcast;
 
-use crate::utils::{CliError, CliResult, OutputFormat, print_error, print_info, print_success, print_warning};
+use crate::utils::{print_error, print_info, print_success, CliError, CliResult, OutputFormat};
 
 /// Arguments for the start command
 #[derive(Parser, Debug)]
@@ -122,7 +121,10 @@ pub async fn execute(args: StartArgs, output_format: OutputFormat) -> CliResult<
         println!("  P2P:        {}", config.p2p_address);
     }
     if args.metrics {
-        println!("  Metrics:    http://127.0.0.1:{}/metrics", args.metrics_port);
+        println!(
+            "  Metrics:    http://127.0.0.1:{}/metrics",
+            args.metrics_port
+        );
     }
     println!();
     println!("Press Ctrl+C to stop the node");
@@ -168,7 +170,10 @@ impl std::str::FromStr for SyncMode {
             "full" => Ok(SyncMode::Full),
             "fast" => Ok(SyncMode::Fast),
             "light" => Ok(SyncMode::Light),
-            _ => Err(CliError::InvalidArgument(format!("Invalid sync mode: {}", s))),
+            _ => Err(CliError::InvalidArgument(format!(
+                "Invalid sync mode: {}",
+                s
+            ))),
         }
     }
 }
@@ -189,7 +194,10 @@ fn load_config(config_path: &Path, args: &StartArgs) -> CliResult<NodeConfig> {
 
     // Chain configuration
     let chain_id = args.chain_id.unwrap_or_else(|| {
-        chain.and_then(|c| c.get("chain_id")).and_then(|v| v.as_integer()).unwrap_or(1) as u64
+        chain
+            .and_then(|c| c.get("chain_id"))
+            .and_then(|v| v.as_integer())
+            .unwrap_or(1) as u64
     });
 
     let network_name = chain
@@ -204,22 +212,29 @@ fn load_config(config_path: &Path, args: &StartArgs) -> CliResult<NodeConfig> {
         .and_then(|v| v.as_str())
         .map(|s| s.replace("~", &dirs::home_dir().unwrap_or_default().to_string_lossy()));
 
-    let data_dir = args.data_dir.clone()
+    let data_dir = args
+        .data_dir
+        .clone()
         .or(config_data_dir)
         .map(PathBuf::from)
         .unwrap_or_else(crate::default_data_dir);
 
     // Validator configuration
-    let validator_enabled = args.validator || validator_section
-        .and_then(|v| v.get("enabled"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let validator_enabled = args.validator
+        || validator_section
+            .and_then(|v| v.get("enabled"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
-    let validator_key_path = args.validator_key.clone()
-        .or_else(|| validator_section
-            .and_then(|v| v.get("key_file"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.replace("~", &dirs::home_dir().unwrap_or_default().to_string_lossy())))
+    let validator_key_path = args
+        .validator_key
+        .clone()
+        .or_else(|| {
+            validator_section
+                .and_then(|v| v.get("key_file"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.replace("~", &dirs::home_dir().unwrap_or_default().to_string_lossy()))
+        })
         .map(PathBuf::from);
 
     // P2P configuration
@@ -232,17 +247,25 @@ fn load_config(config_path: &Path, args: &StartArgs) -> CliResult<NodeConfig> {
     });
 
     let max_peers = args.max_peers.unwrap_or_else(|| {
-        network.and_then(|n| n.get("max_peers")).and_then(|v| v.as_integer()).unwrap_or(50) as usize
+        network
+            .and_then(|n| n.get("max_peers"))
+            .and_then(|v| v.as_integer())
+            .unwrap_or(50) as usize
     });
 
-    let bootstrap_nodes: Vec<String> = args.bootnodes
+    let bootstrap_nodes: Vec<String> = args
+        .bootnodes
         .as_ref()
         .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_else(|| {
             network
                 .and_then(|n| n.get("bootstrap_nodes"))
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default()
         });
 
@@ -422,7 +445,9 @@ async fn load_validator_key(config: &NodeConfig) -> CliResult<()> {
     })?;
 
     if !key_path.exists() {
-        return Err(CliError::FileNotFound(key_path.to_string_lossy().to_string()));
+        return Err(CliError::FileNotFound(
+            key_path.to_string_lossy().to_string(),
+        ));
     }
 
     // TODO: Load and validate the validator key
@@ -456,7 +481,10 @@ async fn initialize_consensus(config: &NodeConfig) -> CliResult<()> {
     // };
     // let _consensus = protocore_consensus::ProtoBftEngine::new(consensus_config).await?;
 
-    tracing::debug!("Consensus engine initialized for chain: {}", config.chain_id);
+    tracing::debug!(
+        "Consensus engine initialized for chain: {}",
+        config.chain_id
+    );
     Ok(())
 }
 
@@ -519,4 +547,3 @@ async fn wait_for_shutdown(shutdown_tx: broadcast::Sender<()>, _node: NodeHandle
 
     Ok(())
 }
-

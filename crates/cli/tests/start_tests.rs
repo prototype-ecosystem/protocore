@@ -30,9 +30,11 @@ fn test_start_args_defaults() {
 fn test_start_args_validator() {
     let args = StartArgs::parse_from([
         "start",
-        "--config", "test.toml",
+        "--config",
+        "test.toml",
         "--validator",
-        "--validator-key", "/path/to/key",
+        "--validator-key",
+        "/path/to/key",
     ]);
     assert!(args.validator);
     assert_eq!(args.validator_key, Some("/path/to/key".to_string()));

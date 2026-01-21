@@ -26,9 +26,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use protocore_crypto::{bls::{BlsPrivateKey, BlsSignature}, Hash};
-use protocore_types::Block;
 use parking_lot::RwLock;
+use protocore_crypto::{
+    bls::{BlsPrivateKey, BlsSignature},
+    Hash,
+};
+use protocore_types::Block;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
 
@@ -81,7 +84,9 @@ pub enum ConsensusError {
     WalError(#[from] WalError),
 
     /// Equivocation attempt detected (safety critical)
-    #[error("equivocation attempt at height {height}, round {round}: already signed different value")]
+    #[error(
+        "equivocation attempt at height {height}, round {round}: already signed different value"
+    )]
     EquivocationAttempt {
         /// Block height
         height: u64,
@@ -352,7 +357,11 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
     }
 
     /// Enter a new round (boxed to allow recursive calls from on_proposal/on_vote)
-    pub fn enter_round(&self, height: u64, round: u64) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+    pub fn enter_round(
+        &self,
+        height: u64,
+        round: u64,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             info!(height = height, round = round, "Entering round");
 
@@ -391,7 +400,8 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
                 self.do_propose().await;
             } else {
                 // Schedule propose timeout
-                self.timeout_scheduler.schedule(Step::Propose, height, round);
+                self.timeout_scheduler
+                    .schedule(Step::Propose, height, round);
             }
         })
     }
@@ -504,11 +514,17 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         };
 
         let Some(pubkey) = proposer_pubkey else {
-            warn!("Unknown proposer for height {} round {}", proposal.height, proposal.round);
+            warn!(
+                "Unknown proposer for height {} round {}",
+                proposal.height, proposal.round
+            );
             return;
         };
 
-        if !proposal.signature.verify(&proposal.signing_bytes(), &pubkey) {
+        if !proposal
+            .signature
+            .verify(&proposal.signing_bytes(), &pubkey)
+        {
             warn!(
                 height = proposal.height,
                 round = proposal.round,
@@ -543,7 +559,9 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         }
 
         // Store proposal
-        self.proposals.write().insert(proposal.round, proposal.clone());
+        self.proposals
+            .write()
+            .insert(proposal.round, proposal.clone());
 
         // Round catch-up: if valid proposal is for a higher round, advance to it
         if proposal.round > round {
@@ -578,7 +596,10 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         let should_prevote = if locked_round == -1 {
             // Not locked, vote for valid proposal
             true
-        } else if locked_value.as_ref().map(|b| b.hash().as_bytes() == &block_hash_arr).unwrap_or(false)
+        } else if locked_value
+            .as_ref()
+            .map(|b| b.hash().as_bytes() == &block_hash_arr)
+            .unwrap_or(false)
         {
             // Proposal matches our locked value
             true
@@ -638,8 +659,16 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
                     error!(
                         height = height,
                         round = round,
-                        existing = if existing_hash == NIL_HASH { "NIL".to_string() } else { hex::encode(&existing_hash[..8]) },
-                        attempted = if block_hash == NIL_HASH { "NIL".to_string() } else { hex::encode(&block_hash[..8]) },
+                        existing = if existing_hash == NIL_HASH {
+                            "NIL".to_string()
+                        } else {
+                            hex::encode(&existing_hash[..8])
+                        },
+                        attempted = if block_hash == NIL_HASH {
+                            "NIL".to_string()
+                        } else {
+                            hex::encode(&block_hash[..8])
+                        },
                         "CRITICAL: Attempted to sign different prevote - equivocation prevented"
                     );
                     return;
@@ -674,7 +703,13 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         self.timeout_scheduler.cancel(Step::Propose, height, round);
 
         // Create and sign vote
-        let mut vote = Vote::new(VoteType::Prevote, height, round, block_hash, self.validator_id);
+        let mut vote = Vote::new(
+            VoteType::Prevote,
+            height,
+            round,
+            block_hash,
+            self.validator_id,
+        );
         vote.signature = self.private_key.sign(&vote.signing_bytes());
 
         debug!(
@@ -701,84 +736,88 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         self.on_vote(vote).await;
 
         // Schedule prevote timeout
-        self.timeout_scheduler.schedule(Step::Prevote, height, round);
+        self.timeout_scheduler
+            .schedule(Step::Prevote, height, round);
     }
 
     /// Handle an incoming vote
-    pub fn on_vote(&self, vote: Vote) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+    pub fn on_vote(
+        &self,
+        vote: Vote,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
-        let (height, round) = {
-            let state = self.state.read();
-            (state.height, state.round)
-        };
+            let (height, round) = {
+                let state = self.state.read();
+                (state.height, state.round)
+            };
 
-        if vote.height != height {
-            trace!(
-                vote_height = vote.height,
-                our_height = height,
-                "Ignoring vote for different height"
-            );
-            return;
-        }
-
-        // Add vote to appropriate set
-        let vs = self.validator_set.read().clone();
-        let quorum_hash = match vote.vote_type {
-            VoteType::Prevote => {
-                let mut votes = self.height_votes.write();
-                match votes.prevotes(vote.round).add_vote(vote.clone(), &vs) {
-                    Ok(hash) => hash,
-                    Err(e) => {
-                        trace!(error = %e, "Failed to add prevote");
-                        None
-                    }
-                }
+            if vote.height != height {
+                trace!(
+                    vote_height = vote.height,
+                    our_height = height,
+                    "Ignoring vote for different height"
+                );
+                return;
             }
-            VoteType::Precommit => {
-                let mut votes = self.height_votes.write();
-                match votes.precommits(vote.round).add_vote(vote.clone(), &vs) {
-                    Ok(hash) => hash,
-                    Err(e) => {
-                        trace!(error = %e, "Failed to add precommit");
-                        None
-                    }
-                }
-            }
-        };
 
-        // Handle quorum if reached
-        if let Some(hash) = quorum_hash {
-            match vote.vote_type {
+            // Add vote to appropriate set
+            let vs = self.validator_set.read().clone();
+            let quorum_hash = match vote.vote_type {
                 VoteType::Prevote => {
-                    // Round catch-up: if quorum is for a higher round, advance to it
-                    if vote.round > round {
-                        info!(
-                            height = height,
-                            current_round = round,
-                            quorum_round = vote.round,
-                            "Catching up to higher round from prevote quorum"
-                        );
-                        self.enter_round(height, vote.round).await;
-                        self.on_prevote_quorum(hash).await;
-                    } else if vote.round == round {
-                        self.on_prevote_quorum(hash).await;
+                    let mut votes = self.height_votes.write();
+                    match votes.prevotes(vote.round).add_vote(vote.clone(), &vs) {
+                        Ok(hash) => hash,
+                        Err(e) => {
+                            trace!(error = %e, "Failed to add prevote");
+                            None
+                        }
                     }
                 }
                 VoteType::Precommit => {
-                    // Round catch-up for precommit quorum as well
-                    if vote.round > round {
-                        info!(
-                            height = height,
-                            current_round = round,
-                            quorum_round = vote.round,
-                            "Catching up to higher round from precommit quorum"
-                        );
-                        self.enter_round(height, vote.round).await;
+                    let mut votes = self.height_votes.write();
+                    match votes.precommits(vote.round).add_vote(vote.clone(), &vs) {
+                        Ok(hash) => hash,
+                        Err(e) => {
+                            trace!(error = %e, "Failed to add precommit");
+                            None
+                        }
                     }
-                    self.on_precommit_quorum(hash, vote.round).await;
+                }
+            };
+
+            // Handle quorum if reached
+            if let Some(hash) = quorum_hash {
+                match vote.vote_type {
+                    VoteType::Prevote => {
+                        // Round catch-up: if quorum is for a higher round, advance to it
+                        if vote.round > round {
+                            info!(
+                                height = height,
+                                current_round = round,
+                                quorum_round = vote.round,
+                                "Catching up to higher round from prevote quorum"
+                            );
+                            self.enter_round(height, vote.round).await;
+                            self.on_prevote_quorum(hash).await;
+                        } else if vote.round == round {
+                            self.on_prevote_quorum(hash).await;
+                        }
+                    }
+                    VoteType::Precommit => {
+                        // Round catch-up for precommit quorum as well
+                        if vote.round > round {
+                            info!(
+                                height = height,
+                                current_round = round,
+                                quorum_round = vote.round,
+                                "Catching up to higher round from precommit quorum"
+                            );
+                            self.enter_round(height, vote.round).await;
+                        }
+                        self.on_precommit_quorum(hash, vote.round).await;
+                    }
                 }
             }
-        }
         }) // End of Box::pin async block
     }
 
@@ -870,8 +909,16 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
                     error!(
                         height = height,
                         round = round,
-                        existing = if existing_hash == NIL_HASH { "NIL".to_string() } else { hex::encode(&existing_hash[..8]) },
-                        attempted = if block_hash == NIL_HASH { "NIL".to_string() } else { hex::encode(&block_hash[..8]) },
+                        existing = if existing_hash == NIL_HASH {
+                            "NIL".to_string()
+                        } else {
+                            hex::encode(&existing_hash[..8])
+                        },
+                        attempted = if block_hash == NIL_HASH {
+                            "NIL".to_string()
+                        } else {
+                            hex::encode(&block_hash[..8])
+                        },
                         "CRITICAL: Attempted to sign different precommit - equivocation prevented"
                     );
                     return;
@@ -997,10 +1044,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         // Record commit in state machine for safety tracking (prevents conflicting commits)
         {
             let mut sm = self.state_machine.write();
-            if let Err(e) = sm.apply_event(ConsensusEvent::BlockCommitted {
-                height,
-                block_hash,
-            }) {
+            if let Err(e) = sm.apply_event(ConsensusEvent::BlockCommitted { height, block_hash }) {
                 error!(
                     height = height,
                     error = %e,
@@ -1042,10 +1086,9 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
             let votes = self.height_votes.read();
             let vs = self.validator_set.read().clone();
             (
-                votes
-                    .get_precommits(round)
-                    .map(|s| s.clone())
-                    .unwrap_or_else(|| VoteSet::new(block.header.height, round, VoteType::Precommit)),
+                votes.get_precommits(round).cloned().unwrap_or_else(|| {
+                    VoteSet::new(block.header.height, round, VoteType::Precommit)
+                }),
                 vs,
             )
         };
@@ -1063,15 +1106,10 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
 
         // Aggregate signatures
         let sig_refs: Vec<&BlsSignature> = signatures.iter().collect();
-        let aggregate_signature = BlsSignature::aggregate(&sig_refs)
-            .unwrap_or_else(|_| BlsSignature::default());
+        let aggregate_signature =
+            BlsSignature::aggregate(&sig_refs).unwrap_or_else(|_| BlsSignature::default());
 
-        FinalityCert::new(
-            block.header.height,
-            block_hash,
-            aggregate_signature,
-            bitmap,
-        )
+        FinalityCert::new(block.header.height, block_hash, aggregate_signature, bitmap)
     }
 
     /// Handle a timeout event
@@ -1089,10 +1127,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         match timeout.step {
             Step::NewHeight => {
                 // NewHeight timeout should not occur in normal operation
-                warn!(
-                    height = height,
-                    "Unexpected NewHeight timeout"
-                );
+                warn!(height = height, "Unexpected NewHeight timeout");
             }
             Step::Propose => {
                 if step == Step::Propose {
@@ -1187,7 +1222,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
                 .map(|v| v.address)
         };
 
-        let our_address = our_address.ok_or_else(|| {
+        let our_address = our_address.ok_or({
             ConsensusError::InvalidVote(crate::vote_set::VoteSetError::InvalidValidator(
                 self.validator_id,
             ))
@@ -1210,7 +1245,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         // Log if we're no longer a validator
         if new_id.is_none() {
             warn!(
-                our_address = hex::encode(&our_address),
+                our_address = hex::encode(our_address),
                 new_epoch = new_epoch,
                 "This node is no longer a validator in the new epoch"
             );
@@ -1278,4 +1313,3 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         self.state_machine.read().commit_history().highest_height()
     }
 }
-

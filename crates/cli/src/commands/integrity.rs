@@ -10,8 +10,8 @@ use console::style;
 use std::env;
 
 use crate::utils::{
-    format_timestamp, CliError, CliResult, OutputFormat, RpcClient,
-    print_info, print_success, print_warning, print_error,
+    format_timestamp, print_error, print_info, print_warning, CliError, CliResult, OutputFormat,
+    RpcClient,
 };
 
 /// Integrity verification subcommands
@@ -44,8 +44,8 @@ pub struct VerifyArgs {
     pub rpc: String,
 
     /// Show detailed verification information
-    #[arg(long, short)]
-    pub verbose: bool,
+    #[arg(long, short = 'd')]
+    pub detailed: bool,
 }
 
 /// Arguments for attestation status command
@@ -65,7 +65,10 @@ pub async fn execute(cmd: IntegrityCommands, output_format: OutputFormat) -> Cli
 }
 
 /// Execute attestation subcommands
-async fn execute_attestation(cmd: AttestationCommands, output_format: OutputFormat) -> CliResult<()> {
+async fn execute_attestation(
+    cmd: AttestationCommands,
+    output_format: OutputFormat,
+) -> CliResult<()> {
     match cmd {
         AttestationCommands::Status(args) => execute_attestation_status(args, output_format).await,
     }
@@ -83,14 +86,15 @@ async fn execute_verify(args: VerifyArgs, output_format: OutputFormat) -> CliRes
     };
 
     if !binary_path.exists() {
-        return Err(CliError::FileNotFound(binary_path.to_string_lossy().to_string()));
+        return Err(CliError::FileNotFound(
+            binary_path.to_string_lossy().to_string(),
+        ));
     }
 
     print_info("Verifying binary integrity...");
 
     // Read the binary and compute hash
-    let binary_data = std::fs::read(&binary_path)
-        .map_err(|e| CliError::Io(e))?;
+    let binary_data = std::fs::read(&binary_path).map_err(CliError::Io)?;
 
     let binary_hash = compute_sha256(&binary_data);
 
@@ -117,20 +121,22 @@ async fn execute_verify(args: VerifyArgs, output_format: OutputFormat) -> CliRes
             println!("Hash:   {}...", &binary_hash[..40]);
 
             if verification_result.verified {
-                println!("Status: {} Verified ({}/{} signatures)",
+                println!(
+                    "Status: {} Verified ({}/{} signatures)",
                     style("✓").green().bold(),
                     verification_result.valid_signatures,
                     verification_result.required_signatures
                 );
             } else {
-                println!("Status: {} Unverified ({}/{} signatures)",
+                println!(
+                    "Status: {} Unverified ({}/{} signatures)",
                     style("✗").red().bold(),
                     verification_result.valid_signatures,
                     verification_result.required_signatures
                 );
             }
 
-            if args.verbose {
+            if args.detailed {
                 println!();
                 println!("Signers:");
                 for signer in &verification_result.signers {
@@ -139,11 +145,7 @@ async fn execute_verify(args: VerifyArgs, output_format: OutputFormat) -> CliRes
                     } else {
                         style("✗").red()
                     };
-                    println!("  {} {} ({})",
-                        status_icon,
-                        signer.address,
-                        signer.name
-                    );
+                    println!("  {} {} ({})", status_icon, signer.address, signer.name);
                 }
             }
 
@@ -161,7 +163,10 @@ async fn execute_verify(args: VerifyArgs, output_format: OutputFormat) -> CliRes
 }
 
 /// Execute attestation status command
-async fn execute_attestation_status(args: AttestationStatusArgs, output_format: OutputFormat) -> CliResult<()> {
+async fn execute_attestation_status(
+    args: AttestationStatusArgs,
+    output_format: OutputFormat,
+) -> CliResult<()> {
     let client = RpcClient::new(&args.rpc)?;
 
     print_info("Checking attestation status...");
@@ -207,7 +212,9 @@ async fn execute_attestation_status(args: AttestationStatusArgs, output_format: 
 
             if !attestation_status.binary_verified {
                 println!();
-                print_error("Binary is not verified! Run 'protocore integrity verify' for details.");
+                print_error(
+                    "Binary is not verified! Run 'protocore integrity verify' for details.",
+                );
             }
         }
     }
@@ -217,7 +224,7 @@ async fn execute_attestation_status(args: AttestationStatusArgs, output_format: 
 
 /// Compute SHA-256 hash of data
 fn compute_sha256(data: &[u8]) -> String {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(data);
     let result = hasher.finalize();
@@ -235,9 +242,13 @@ fn format_time_remaining(seconds: u64) -> String {
         let hours = seconds / 3600;
         let minutes = (seconds % 3600) / 60;
         if minutes > 0 {
-            format!("{} hour{} {} minute{}",
-                hours, if hours == 1 { "" } else { "s" },
-                minutes, if minutes == 1 { "" } else { "s" })
+            format!(
+                "{} hour{} {} minute{}",
+                hours,
+                if hours == 1 { "" } else { "s" },
+                minutes,
+                if minutes == 1 { "" } else { "s" }
+            )
         } else {
             format!("{} hour{}", hours, if hours == 1 { "" } else { "s" })
         }
@@ -245,9 +256,13 @@ fn format_time_remaining(seconds: u64) -> String {
         let days = seconds / 86400;
         let hours = (seconds % 86400) / 3600;
         if hours > 0 {
-            format!("{} day{} {} hour{}",
-                days, if days == 1 { "" } else { "s" },
-                hours, if hours == 1 { "" } else { "s" })
+            format!(
+                "{} day{} {} hour{}",
+                days,
+                if days == 1 { "" } else { "s" },
+                hours,
+                if hours == 1 { "" } else { "s" }
+            )
         } else {
             format!("{} day{}", days, if days == 1 { "" } else { "s" })
         }
@@ -296,4 +311,3 @@ pub struct AttestationStatus {
     /// Whether attestation is required soon
     pub attestation_required: bool,
 }
-

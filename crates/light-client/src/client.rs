@@ -14,7 +14,6 @@
 
 use crate::constants::{
     DEFAULT_EPOCH_LENGTH, FINALITY_THRESHOLD_DENOMINATOR, FINALITY_THRESHOLD_NUMERATOR,
-    MAX_HEADERS_PER_SYNC,
 };
 use crate::proofs::{AccountProof, ProofVerifier, ReceiptProof, StorageProof, TransactionProof};
 use crate::types::{Address, BlockHeight, Epoch, Hash, Stake};
@@ -100,7 +99,11 @@ pub struct ValidatorSet {
 impl ValidatorSet {
     /// Create a new validator set
     pub fn new(epoch: Epoch, validators: Vec<ValidatorInfo>) -> Self {
-        let total_stake = validators.iter().filter(|v| v.active).map(|v| v.stake).sum();
+        let total_stake = validators
+            .iter()
+            .filter(|v| v.active)
+            .map(|v| v.stake)
+            .sum();
         let address_index = validators
             .iter()
             .enumerate()
@@ -268,8 +271,11 @@ impl FinalityCertificate {
 
             // Verify signature (placeholder - actual BLS verification would go here)
             // In production, this would call into protocore-crypto's BLS module
-            if !self.verify_bls_signature(&sig.signature, &self.block_hash, &validator.bls_public_key)
-            {
+            if !self.verify_bls_signature(
+                &sig.signature,
+                &self.block_hash,
+                &validator.bls_public_key,
+            ) {
                 return Err(Error::InvalidSignature {
                     validator: format!("0x{}", hex::encode(sig.validator)),
                 });
@@ -406,10 +412,7 @@ impl ValidatorTracker {
         let cutoff = self.current_epoch - keep_epochs;
         self.sets.retain(|&epoch, _| epoch >= cutoff);
 
-        debug!(
-            "Pruned validator sets: keeping epochs >= {}",
-            cutoff
-        );
+        debug!("Pruned validator sets: keeping epochs >= {}", cutoff);
     }
 
     /// Get the number of tracked epochs
@@ -528,10 +531,7 @@ impl HeaderChain {
 
     /// Get headers in a range
     pub fn get_range(&self, start: BlockHeight, end: BlockHeight) -> Vec<&LightBlockHeader> {
-        self.by_number
-            .range(start..=end)
-            .map(|(_, h)| h)
-            .collect()
+        self.by_number.range(start..=end).map(|(_, h)| h).collect()
     }
 
     /// Verify the chain from a starting point
@@ -856,15 +856,12 @@ impl LightClient {
             .cloned()
             .ok_or_else(|| Error::HeaderNotFound(format!("0x{}", hex::encode(block_hash))))?;
 
-        self.verifier.verify_account_proof(proof, &header.state_root)
+        self.verifier
+            .verify_account_proof(proof, &header.state_root)
     }
 
     /// Verify a storage slot proof
-    pub fn verify_storage(
-        &self,
-        proof: &StorageProof,
-        block_hash: &Hash,
-    ) -> Result<[u8; 32]> {
+    pub fn verify_storage(&self, proof: &StorageProof, block_hash: &Hash) -> Result<[u8; 32]> {
         let header = self
             .headers
             .read()
@@ -872,15 +869,12 @@ impl LightClient {
             .cloned()
             .ok_or_else(|| Error::HeaderNotFound(format!("0x{}", hex::encode(block_hash))))?;
 
-        self.verifier.verify_storage_proof(proof, &header.state_root)
+        self.verifier
+            .verify_storage_proof(proof, &header.state_root)
     }
 
     /// Verify a transaction inclusion proof
-    pub fn verify_transaction(
-        &self,
-        proof: &TransactionProof,
-        block_hash: &Hash,
-    ) -> Result<bool> {
+    pub fn verify_transaction(&self, proof: &TransactionProof, block_hash: &Hash) -> Result<bool> {
         let header = self
             .headers
             .read()
@@ -941,4 +935,3 @@ pub struct LightClientStats {
     /// Number of validators in current set
     pub validator_count: Option<usize>,
 }
-

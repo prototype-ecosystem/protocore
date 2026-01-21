@@ -12,8 +12,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::utils::{CliError, CliResult, OutputFormat, print_error, print_info, print_success, print_warning};
 use crate::default_keystore_dir;
+use crate::utils::{print_info, print_success, print_warning, CliError, CliResult, OutputFormat};
 
 /// Key management subcommands
 #[derive(Subcommand, Debug)]
@@ -45,8 +45,8 @@ pub struct GenerateArgs {
     pub key_type: String,
 
     /// Output file path
-    #[arg(short, long)]
-    pub output: Option<String>,
+    #[arg(short = 'o', long = "output-file")]
+    pub output_file: Option<String>,
 
     /// Key name/label for identification
     #[arg(long)]
@@ -108,8 +108,8 @@ pub struct ExportArgs {
     pub key: String,
 
     /// Output file path
-    #[arg(short, long)]
-    pub output: Option<String>,
+    #[arg(short = 'o', long = "output-file")]
+    pub output_file: Option<String>,
 
     /// Keystore directory
     #[arg(long)]
@@ -178,15 +178,17 @@ async fn execute_generate(args: GenerateArgs, output_format: OutputFormat) -> Cl
     };
 
     // Determine output path
-    let keystore_dir = args.keystore
+    let keystore_dir = args
+        .keystore
         .map(PathBuf::from)
         .unwrap_or_else(default_keystore_dir);
 
-    let output_path = if let Some(output) = args.output {
-        PathBuf::from(output)
+    let output_path = if let Some(output_file) = args.output_file {
+        PathBuf::from(output_file)
     } else {
         ensure_dir_exists(&keystore_dir)?;
-        let filename = format!("{}--{}.json",
+        let filename = format!(
+            "{}--{}.json",
             chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S"),
             &key_info.address[2..10] // First 8 chars after 0x
         );
@@ -197,11 +199,17 @@ async fn execute_generate(args: GenerateArgs, output_format: OutputFormat) -> Cl
     let key_file = KeystoreFile {
         version: 1,
         key_type: args.key_type.clone(),
-        name: args.name.clone().unwrap_or_else(|| format!("key-{}", &key_info.address[2..10])),
+        name: args
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("key-{}", &key_info.address[2..10])),
         address: key_info.address.clone(),
         public_key: key_info.public_key.clone(),
         crypto: if password.is_some() {
-            Some(encrypt_key(&key_info.private_key, password.as_ref().unwrap())?)
+            Some(encrypt_key(
+                &key_info.private_key,
+                password.as_ref().unwrap(),
+            )?)
         } else {
             None
         },
@@ -254,10 +262,15 @@ async fn execute_generate(args: GenerateArgs, output_format: OutputFormat) -> Cl
                 println!("  BLS Key:    {}...", &bls[..40]);
             }
             println!("  File:       {}", result.file_path);
-            println!("  Encrypted:  {}", if result.encrypted { "Yes" } else { "No" });
+            println!(
+                "  Encrypted:  {}",
+                if result.encrypted { "Yes" } else { "No" }
+            );
             println!();
             if !result.encrypted {
-                print_warning("Key is not password protected. Consider using --password for production keys.");
+                print_warning(
+                    "Key is not password protected. Consider using --password for production keys.",
+                );
             }
         }
     }
@@ -267,12 +280,15 @@ async fn execute_generate(args: GenerateArgs, output_format: OutputFormat) -> Cl
 
 /// Execute key listing
 async fn execute_list(args: ListArgs, output_format: OutputFormat) -> CliResult<()> {
-    let keystore_dir = args.keystore
+    let keystore_dir = args
+        .keystore
         .map(PathBuf::from)
         .unwrap_or_else(default_keystore_dir);
 
     if !keystore_dir.exists() {
-        return Err(CliError::FileNotFound(keystore_dir.to_string_lossy().to_string()));
+        return Err(CliError::FileNotFound(
+            keystore_dir.to_string_lossy().to_string(),
+        ));
     }
 
     let mut keys: Vec<KeyListEntry> = Vec::new();
@@ -281,7 +297,7 @@ async fn execute_list(args: ListArgs, output_format: OutputFormat) -> CliResult<
         let entry = entry?;
         let path = entry.path();
 
-        if path.extension().map_or(false, |ext| ext == "json") {
+        if path.extension().is_some_and(|ext| ext == "json") {
             if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(key_file) = serde_json::from_str::<KeystoreFile>(&content) {
                     keys.push(KeyListEntry {
@@ -289,7 +305,8 @@ async fn execute_list(args: ListArgs, output_format: OutputFormat) -> CliResult<
                         key_type: key_file.key_type,
                         address: key_file.address,
                         encrypted: key_file.crypto.is_some(),
-                        file: path.file_name()
+                        file: path
+                            .file_name()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_default(),
                     });
@@ -309,13 +326,20 @@ async fn execute_list(args: ListArgs, output_format: OutputFormat) -> CliResult<
             } else {
                 println!("Keys in {}", keystore_dir.display());
                 println!();
-                println!("{:<20} {:<10} {:<44} {:<10}", "NAME", "TYPE", "ADDRESS", "ENCRYPTED");
+                println!(
+                    "{:<20} {:<10} {:<44} {:<10}",
+                    "NAME", "TYPE", "ADDRESS", "ENCRYPTED"
+                );
                 println!("{}", "-".repeat(86));
                 for key in &keys {
                     let address = if args.full {
                         key.address.clone()
                     } else {
-                        format!("{}...{}", &key.address[..10], &key.address[key.address.len()-8..])
+                        format!(
+                            "{}...{}",
+                            &key.address[..10],
+                            &key.address[key.address.len() - 8..]
+                        )
                     };
                     println!(
                         "{:<20} {:<10} {:<44} {:<10}",
@@ -341,18 +365,22 @@ async fn execute_import(args: ImportArgs, output_format: OutputFormat) -> CliRes
     // Get private key from hex or mnemonic
     let private_key_bytes = if let Some(ref hex_key) = args.hex {
         let hex_clean = hex_key.strip_prefix("0x").unwrap_or(hex_key);
-        hex::decode(hex_clean).map_err(|e| CliError::InvalidArgument(format!("Invalid hex: {}", e)))?
+        hex::decode(hex_clean)
+            .map_err(|e| CliError::InvalidArgument(format!("Invalid hex: {}", e)))?
     } else if let Some(ref mnemonic) = args.mnemonic {
         // TODO: Implement BIP-39 mnemonic derivation
         // For now, return error
-        return Err(CliError::NotImplemented("Mnemonic import not yet implemented".to_string()));
+        return Err(CliError::NotImplemented(
+            "Mnemonic import not yet implemented".to_string(),
+        ));
     } else {
         // Interactive mode - prompt for key
         let hex_key: String = Input::new()
             .with_prompt("Enter private key (hex)")
             .interact_text()?;
         let hex_clean = hex_key.strip_prefix("0x").unwrap_or(&hex_key);
-        hex::decode(hex_clean).map_err(|e| CliError::InvalidArgument(format!("Invalid hex: {}", e)))?
+        hex::decode(hex_clean)
+            .map_err(|e| CliError::InvalidArgument(format!("Invalid hex: {}", e)))?
     };
 
     if private_key_bytes.len() != 32 {
@@ -375,12 +403,14 @@ async fn execute_import(args: ImportArgs, output_format: OutputFormat) -> CliRes
     };
 
     // Determine output path
-    let keystore_dir = args.keystore
+    let keystore_dir = args
+        .keystore
         .map(PathBuf::from)
         .unwrap_or_else(default_keystore_dir);
     ensure_dir_exists(&keystore_dir)?;
 
-    let filename = format!("{}--{}.json",
+    let filename = format!(
+        "{}--{}.json",
         chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S"),
         &key_info.address[2..10]
     );
@@ -390,11 +420,17 @@ async fn execute_import(args: ImportArgs, output_format: OutputFormat) -> CliRes
     let key_file = KeystoreFile {
         version: 1,
         key_type: args.key_type.clone(),
-        name: args.name.clone().unwrap_or_else(|| format!("imported-{}", &key_info.address[2..10])),
+        name: args
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("imported-{}", &key_info.address[2..10])),
         address: key_info.address.clone(),
         public_key: key_info.public_key.clone(),
         crypto: if password.is_some() {
-            Some(encrypt_key(&key_info.private_key, password.as_ref().unwrap())?)
+            Some(encrypt_key(
+                &key_info.private_key,
+                password.as_ref().unwrap(),
+            )?)
         } else {
             None
         },
@@ -445,7 +481,8 @@ async fn execute_import(args: ImportArgs, output_format: OutputFormat) -> CliRes
 
 /// Execute key export
 async fn execute_export(args: ExportArgs, output_format: OutputFormat) -> CliResult<()> {
-    let keystore_dir = args.keystore
+    let keystore_dir = args
+        .keystore
         .map(PathBuf::from)
         .unwrap_or_else(default_keystore_dir);
 
@@ -460,20 +497,20 @@ async fn execute_export(args: ExportArgs, output_format: OutputFormat) -> CliRes
     } else if let Some(ref pk) = key_data.private_key {
         pk.clone()
     } else {
-        return Err(CliError::KeyError("Key file has no private key data".to_string()));
+        return Err(CliError::KeyError(
+            "Key file has no private key data".to_string(),
+        ));
     };
 
     let export_data = match args.format.as_str() {
         "hex" => {
             format!("0x{}", private_key)
         }
-        "json" => {
-            serde_json::to_string_pretty(&serde_json::json!({
-                "address": key_data.address,
-                "private_key": format!("0x{}", private_key),
-                "public_key": key_data.public_key,
-            }))?
-        }
+        "json" => serde_json::to_string_pretty(&serde_json::json!({
+            "address": key_data.address,
+            "private_key": format!("0x{}", private_key),
+            "public_key": key_data.public_key,
+        }))?,
         "keystore" => {
             // Export as encrypted keystore format
             let password = prompt_password("Enter password for exported keystore: ")?;
@@ -491,22 +528,28 @@ async fn execute_export(args: ExportArgs, output_format: OutputFormat) -> CliRes
             })?
         }
         _ => {
-            return Err(CliError::InvalidArgument(format!("Unknown export format: {}", args.format)));
+            return Err(CliError::InvalidArgument(format!(
+                "Unknown export format: {}",
+                args.format
+            )));
         }
     };
 
     // Output
-    if let Some(output_path) = args.output {
-        fs::write(&output_path, &export_data)?;
-        print_success(&format!("Key exported to: {}", output_path));
+    if let Some(output_file) = args.output_file {
+        fs::write(&output_file, &export_data)?;
+        print_success(&format!("Key exported to: {}", output_file));
     } else {
         match output_format {
             OutputFormat::Json => {
-                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                    "address": key_data.address,
-                    "format": args.format,
-                    "data": export_data,
-                }))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "address": key_data.address,
+                        "format": args.format,
+                        "data": export_data,
+                    }))?
+                );
             }
             OutputFormat::Text => {
                 print_warning("Displaying private key - ensure no one is watching!");
@@ -521,7 +564,8 @@ async fn execute_export(args: ExportArgs, output_format: OutputFormat) -> CliRes
 
 /// Execute key show
 async fn execute_show(args: ShowArgs, output_format: OutputFormat) -> CliResult<()> {
-    let keystore_dir = args.keystore
+    let keystore_dir = args
+        .keystore
         .map(PathBuf::from)
         .unwrap_or_else(default_keystore_dir);
 
@@ -553,7 +597,10 @@ async fn execute_show(args: ShowArgs, output_format: OutputFormat) -> CliResult<
             if let Some(ref bls) = info.bls_public_key {
                 println!("  BLS Key:    {}", bls);
             }
-            println!("  Encrypted:  {}", if info.encrypted { "Yes" } else { "No" });
+            println!(
+                "  Encrypted:  {}",
+                if info.encrypted { "Yes" } else { "No" }
+            );
             println!("  Created:    {}", info.created_at);
             println!("  File:       {}", info.file_path);
         }
@@ -564,7 +611,8 @@ async fn execute_show(args: ShowArgs, output_format: OutputFormat) -> CliResult<
 
 /// Execute key delete
 async fn execute_delete(args: DeleteArgs, output_format: OutputFormat) -> CliResult<()> {
-    let keystore_dir = args.keystore
+    let keystore_dir = args
+        .keystore
         .map(PathBuf::from)
         .unwrap_or_else(default_keystore_dir);
 
@@ -573,7 +621,10 @@ async fn execute_delete(args: DeleteArgs, output_format: OutputFormat) -> CliRes
 
     // Confirm deletion
     if !args.force {
-        print_warning(&format!("You are about to delete key: {}", key_data.address));
+        print_warning(&format!(
+            "You are about to delete key: {}",
+            key_data.address
+        ));
         let confirm = Confirm::new()
             .with_prompt("Are you sure you want to delete this key?")
             .default(false)
@@ -589,11 +640,14 @@ async fn execute_delete(args: DeleteArgs, output_format: OutputFormat) -> CliRes
 
     match output_format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "status": "deleted",
-                "address": key_data.address,
-                "file": key_file.to_string_lossy(),
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": "deleted",
+                    "address": key_data.address,
+                    "file": key_file.to_string_lossy(),
+                }))?
+            );
         }
         OutputFormat::Text => {
             print_success(&format!("Key {} deleted successfully", key_data.address));
@@ -618,7 +672,10 @@ fn parse_key_type(s: &str) -> CliResult<KeyType> {
     match s.to_lowercase().as_str() {
         "wallet" => Ok(KeyType::Wallet),
         "validator" => Ok(KeyType::Validator),
-        _ => Err(CliError::InvalidArgument(format!("Unknown key type: {}", s))),
+        _ => Err(CliError::InvalidArgument(format!(
+            "Unknown key type: {}",
+            s
+        ))),
     }
 }
 
@@ -641,15 +698,15 @@ fn generate_wallet_key() -> CliResult<KeyInfo> {
     Ok(KeyInfo {
         private_key: hex::encode(private_key.to_bytes()),
         public_key: format!("0x{}", hex::encode(public_key.to_compressed())),
-        address: format!("0x{}", hex::encode(&address)),
+        address: format!("0x{}", hex::encode(address)),
         bls_public_key: None,
     })
 }
 
 /// Generate a validator key (includes BLS)
 fn generate_validator_key() -> CliResult<KeyInfo> {
-    use protocore_crypto::ecdsa::PrivateKey;
     use protocore_crypto::bls::BlsPrivateKey;
+    use protocore_crypto::ecdsa::PrivateKey;
 
     let ecdsa_key = PrivateKey::random();
     let ecdsa_public = ecdsa_key.public_key();
@@ -661,18 +718,19 @@ fn generate_validator_key() -> CliResult<KeyInfo> {
     Ok(KeyInfo {
         private_key: hex::encode(ecdsa_key.to_bytes()),
         public_key: format!("0x{}", hex::encode(ecdsa_public.to_compressed())),
-        address: format!("0x{}", hex::encode(&address)),
+        address: format!("0x{}", hex::encode(address)),
         bls_public_key: Some(format!("0x{}", hex::encode(bls_public.to_bytes()))),
     })
 }
 
 /// Derive key info from private key bytes
 fn derive_key_info(private_key_bytes: &[u8], key_type: KeyType) -> CliResult<KeyInfo> {
-    use protocore_crypto::ecdsa::PrivateKey;
     use protocore_crypto::bls::BlsPrivateKey;
+    use protocore_crypto::ecdsa::PrivateKey;
 
     // Convert slice to fixed-size array
-    let key_array: [u8; 32] = private_key_bytes.try_into()
+    let key_array: [u8; 32] = private_key_bytes
+        .try_into()
         .map_err(|_| CliError::KeyError("Private key must be exactly 32 bytes".to_string()))?;
 
     let ecdsa_key = PrivateKey::from_bytes(&key_array)
@@ -691,7 +749,7 @@ fn derive_key_info(private_key_bytes: &[u8], key_type: KeyType) -> CliResult<Key
     Ok(KeyInfo {
         private_key: hex::encode(private_key_bytes),
         public_key: format!("0x{}", hex::encode(ecdsa_public.to_compressed())),
-        address: format!("0x{}", hex::encode(&address)),
+        address: format!("0x{}", hex::encode(address)),
         bls_public_key,
     })
 }
@@ -746,9 +804,9 @@ fn encrypt_key(private_key: &str, _password: &str) -> CliResult<CryptoParams> {
             r: 8,
             p: 1,
             dklen: 32,
-            salt: hex::encode(&[0u8; 32]),
+            salt: hex::encode([0u8; 32]),
         },
-        mac: hex::encode(&[0u8; 32]),
+        mac: hex::encode([0u8; 32]),
     })
 }
 
@@ -758,14 +816,15 @@ fn decrypt_key(crypto: &CryptoParams, _password: &str) -> CliResult<String> {
     // For now, return the ciphertext as-is (placeholder)
     let bytes = hex::decode(&crypto.ciphertext)
         .map_err(|e| CliError::KeyError(format!("Decryption failed: {}", e)))?;
-    String::from_utf8(bytes)
-        .map_err(|e| CliError::KeyError(format!("Decryption failed: {}", e)))
+    String::from_utf8(bytes).map_err(|e| CliError::KeyError(format!("Decryption failed: {}", e)))
 }
 
 /// Find key file by address or name
 fn find_key_file(keystore_dir: &Path, key: &str) -> CliResult<PathBuf> {
     if !keystore_dir.exists() {
-        return Err(CliError::FileNotFound(keystore_dir.to_string_lossy().to_string()));
+        return Err(CliError::FileNotFound(
+            keystore_dir.to_string_lossy().to_string(),
+        ));
     }
 
     let key_lower = key.to_lowercase();
@@ -774,7 +833,7 @@ fn find_key_file(keystore_dir: &Path, key: &str) -> CliResult<PathBuf> {
         let entry = entry?;
         let path = entry.path();
 
-        if path.extension().map_or(false, |ext| ext == "json") {
+        if path.extension().is_some_and(|ext| ext == "json") {
             if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(key_file) = serde_json::from_str::<KeystoreFile>(&content) {
                     if key_file.address.to_lowercase() == key_lower
@@ -820,7 +879,7 @@ fn truncate_string(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len-3])
+        format!("{}...", &s[..max_len - 3])
     }
 }
 
@@ -867,4 +926,3 @@ struct KeyShowInfo {
     file_path: String,
     created_at: String,
 }
-

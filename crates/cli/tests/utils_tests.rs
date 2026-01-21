@@ -1,9 +1,9 @@
 //! Tests for utils.rs shared utilities
 
-use std::time::Duration;
 use protocore_cli::utils::{
-    parse_amount, format_balance, format_with_commas, format_duration, OutputFormat,
+    format_balance, format_duration, format_with_commas, parse_amount, OutputFormat,
 };
+use std::time::Duration;
 
 #[test]
 fn test_parse_amount_simple() {

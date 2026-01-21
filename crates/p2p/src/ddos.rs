@@ -263,7 +263,11 @@ impl DdosProtection {
     }
 
     /// Check if a message from a peer should be allowed
-    pub fn check_message(&self, peer_id: &PeerId, message_bytes: usize) -> Result<(), RejectionReason> {
+    pub fn check_message(
+        &self,
+        peer_id: &PeerId,
+        message_bytes: usize,
+    ) -> Result<(), RejectionReason> {
         // Check peer ban
         {
             let banned = self.banned_peers.read();
@@ -528,7 +532,11 @@ mod tests {
 
         // First 5 should succeed
         for i in 0..5 {
-            assert!(protection.check_connection(ip).is_ok(), "Connection {} should succeed", i);
+            assert!(
+                protection.check_connection(ip).is_ok(),
+                "Connection {} should succeed",
+                i
+            );
         }
 
         // 6th should fail

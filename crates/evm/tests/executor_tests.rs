@@ -1,9 +1,6 @@
 //! Integration tests for EVM executor
 
-use protocore_evm::{
-    executor::EvmConfig,
-    DEFAULT_BLOCK_GAS_LIMIT, MAINNET_CHAIN_ID,
-};
+use protocore_evm::{executor::EvmConfig, DEFAULT_BLOCK_GAS_LIMIT, MAINNET_CHAIN_ID};
 
 #[test]
 fn test_evm_config_mainnet() {

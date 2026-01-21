@@ -5,17 +5,14 @@
 use protocore_state_sync::{
     keccak256,
     snapshot::{
-        FinalityCertificate, SnapshotAvailability, SnapshotInfo, SnapshotList,
-        SnapshotListEntry, SnapshotMetadata, SnapshotRequest, SnapshotSelector,
-        SnapshotValidationError,
+        FinalityCertificate, SnapshotAvailability, SnapshotInfo, SnapshotList, SnapshotListEntry,
+        SnapshotMetadata, SnapshotRequest, SnapshotSelector, SnapshotValidationError,
     },
     Hash,
 };
 
 fn create_test_metadata(height: u64, chunk_count: usize) -> SnapshotMetadata {
-    let chunk_hashes: Vec<Hash> = (0..chunk_count)
-        .map(|i| keccak256(&[i as u8]))
-        .collect();
+    let chunk_hashes: Vec<Hash> = (0..chunk_count).map(|i| keccak256(&[i as u8])).collect();
 
     SnapshotMetadata::new(
         height,

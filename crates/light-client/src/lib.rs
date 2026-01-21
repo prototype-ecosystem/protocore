@@ -271,4 +271,3 @@ pub mod constants {
         0xb4, 0x21,
     ];
 }
-

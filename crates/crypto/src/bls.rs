@@ -752,7 +752,10 @@ impl BlsSignature {
             ));
         }
 
-        Ok(Self { inner: sig, domain: None })
+        Ok(Self {
+            inner: sig,
+            domain: None,
+        })
     }
 
     /// Create a signature from bytes with a specific domain.
@@ -885,7 +888,9 @@ impl BlsSignature {
                 Some(domain) => {
                     return Err(CryptoError::BlsError(format!(
                         "signature {} has mismatched domain: expected {:?}, got {:?}",
-                        i, expected_domain.message_type(), domain.message_type()
+                        i,
+                        expected_domain.message_type(),
+                        domain.message_type()
                     )));
                 }
                 None => {
@@ -928,9 +933,14 @@ impl BlsSignature {
         };
 
         // Verify against aggregated public key
-        let result = self
-            .inner
-            .verify(true, message, DST_LEGACY, &[], &agg_pk.to_public_key(), true);
+        let result = self.inner.verify(
+            true,
+            message,
+            DST_LEGACY,
+            &[],
+            &agg_pk.to_public_key(),
+            true,
+        );
         result == BLST_ERROR::BLST_SUCCESS
     }
 
@@ -959,9 +969,14 @@ impl BlsSignature {
         };
 
         // Verify against aggregated public key with domain
-        let result = self
-            .inner
-            .verify(true, message, domain.dst(), &[], &agg_pk.to_public_key(), true);
+        let result = self.inner.verify(
+            true,
+            message,
+            domain.dst(),
+            &[],
+            &agg_pk.to_public_key(),
+            true,
+        );
         result == BLST_ERROR::BLST_SUCCESS
     }
 
@@ -1109,7 +1124,11 @@ impl<'de> Deserialize<'de> for BlsSignature {
 /// * `pubkeys` - Slice of 48-byte public key arrays
 /// * `message` - The message that was signed
 /// * `signature` - The 96-byte aggregated signature
-pub fn bls_verify_aggregate(pubkeys: &[[u8; 48]], message: &[u8; 32], signature: &[u8; 96]) -> bool {
+pub fn bls_verify_aggregate(
+    pubkeys: &[[u8; 48]],
+    message: &[u8; 32],
+    signature: &[u8; 96],
+) -> bool {
     let sig = match BlsSignature::from_bytes(signature) {
         Ok(s) => s,
         Err(_) => return false,
@@ -1317,10 +1336,7 @@ pub fn aggregate_sorted_with_domain(
 /// Verify a proof-of-possession for a public key.
 ///
 /// This is a convenience function for verifying PoPs during validator registration.
-pub fn verify_proof_of_possession(
-    public_key: &BlsPublicKey,
-    pop: &BlsProofOfPossession,
-) -> bool {
+pub fn verify_proof_of_possession(public_key: &BlsPublicKey, pop: &BlsProofOfPossession) -> bool {
     pop.verify(public_key)
 }
 
@@ -1332,4 +1348,3 @@ pub fn batch_verify_proofs_of_possession(
 ) -> bool {
     keys_and_pops.iter().all(|(pk, pop)| pop.verify(pk))
 }
-

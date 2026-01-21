@@ -19,15 +19,15 @@
 //! snapshot's state root without needing the full trie.
 
 use crate::{
-    keccak256, keccak256_concat, Hash, PeerId, DEFAULT_CHUNK_SIZE, DEFAULT_MAX_CONCURRENT_DOWNLOADS,
-    DEFAULT_MAX_RETRIES, DEFAULT_REQUEST_TIMEOUT_SECS,
+    keccak256, keccak256_concat, Hash, PeerId, DEFAULT_CHUNK_SIZE,
+    DEFAULT_MAX_CONCURRENT_DOWNLOADS, DEFAULT_MAX_RETRIES, DEFAULT_REQUEST_TIMEOUT_SECS,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, oneshot, Mutex, RwLock, Semaphore};
-use tracing::{debug, error, info, trace, warn};
+use tokio::sync::{mpsc, Mutex, RwLock, Semaphore};
+use tracing::{debug, error, info, warn};
 
 /// Unique identifier for a chunk within a snapshot
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -806,10 +806,7 @@ impl<N: ChunkNetwork + 'static> ChunkDownloader<N> {
                 }
 
                 let _ = event_tx
-                    .send(ChunkDownloadEvent::Started {
-                        chunk_index,
-                        peer,
-                    })
+                    .send(ChunkDownloadEvent::Started { chunk_index, peer })
                     .await;
 
                 // Create request
@@ -817,11 +814,9 @@ impl<N: ChunkNetwork + 'static> ChunkDownloader<N> {
                 let download_start = Instant::now();
 
                 // Make request with timeout
-                let result = tokio::time::timeout(
-                    config.timeout,
-                    network.request_chunk(peer, request),
-                )
-                .await;
+                let result =
+                    tokio::time::timeout(config.timeout, network.request_chunk(peer, request))
+                        .await;
 
                 match result {
                     Ok(Ok(response)) if response.is_success() => {
@@ -852,10 +847,8 @@ impl<N: ChunkNetwork + 'static> ChunkDownloader<N> {
                                 }
 
                                 // Update stats
-                                bytes_downloaded.fetch_add(
-                                    size as u64,
-                                    std::sync::atomic::Ordering::Relaxed,
-                                );
+                                bytes_downloaded
+                                    .fetch_add(size as u64, std::sync::atomic::Ordering::Relaxed);
 
                                 // Send progress event
                                 let (completed, total) = {
@@ -896,10 +889,7 @@ impl<N: ChunkNetwork + 'static> ChunkDownloader<N> {
                                 return;
                             }
                             Err(e) => {
-                                warn!(
-                                    "Chunk {} verification failed: {:?}",
-                                    chunk_index, e
-                                );
+                                warn!("Chunk {} verification failed: {:?}", chunk_index, e);
                                 network.report_peer(peer, "invalid chunk");
 
                                 let mut states = states.write().await;
@@ -911,11 +901,10 @@ impl<N: ChunkNetwork + 'static> ChunkDownloader<N> {
                         }
                     }
                     Ok(Ok(response)) => {
-                        let error = response.error.unwrap_or_else(|| "unknown error".to_string());
-                        warn!(
-                            "Chunk {} request failed: {}",
-                            chunk_index, error
-                        );
+                        let error = response
+                            .error
+                            .unwrap_or_else(|| "unknown error".to_string());
+                        warn!("Chunk {} request failed: {}", chunk_index, error);
 
                         let mut states = states.write().await;
                         if let Some(state) = states.get_mut(&chunk_index) {
@@ -983,7 +972,7 @@ impl<N: ChunkNetwork + 'static> ChunkDownloader<N> {
 
     /// Get an event receiver
     pub async fn take_event_receiver(&self) -> mpsc::Receiver<ChunkDownloadEvent> {
-        let mut rx = self.event_rx.lock().await;
+        let rx = self.event_rx.lock().await;
         let (new_tx, new_rx) = mpsc::channel(1000);
         // We can't actually take the receiver, so we create a new channel
         // In a real implementation, you'd use a broadcast channel or similar
@@ -995,7 +984,9 @@ impl<N: ChunkNetwork + 'static> ChunkDownloader<N> {
         let verifier = self.verifier.lock().await;
         let completed = verifier.verified_count();
         let total = verifier.total_chunks();
-        let bytes = self.bytes_downloaded.load(std::sync::atomic::Ordering::Relaxed);
+        let bytes = self
+            .bytes_downloaded
+            .load(std::sync::atomic::Ordering::Relaxed);
         let elapsed = self
             .start_time
             .read()
@@ -1172,4 +1163,3 @@ fn generate_request_id() -> u64 {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     COUNTER.fetch_add(1, Ordering::Relaxed)
 }
-

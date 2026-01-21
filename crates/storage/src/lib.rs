@@ -31,16 +31,16 @@ pub use loyalty::{
     LoyaltyError, LoyaltySnapshot, LoyaltyStatus, LoyaltyTracker, ValidatorRegistration,
 };
 pub use pruning::{
-    Checkpoint, PruningConfig, PruningManager, PruningStats,
-    DEFAULT_BLOCKS_RETAINED, DEFAULT_CHECKPOINT_INTERVAL, MIN_BLOCKS_RETAINED,
+    Checkpoint, PruningConfig, PruningManager, PruningStats, DEFAULT_BLOCKS_RETAINED,
+    DEFAULT_CHECKPOINT_INTERVAL, MIN_BLOCKS_RETAINED,
 };
 pub use snapshot::{Snapshot, SnapshotChunk, SnapshotManager};
 pub use state::{Account, StateDB, StateDiff};
 pub use testnet_incentives::{
-    ActivityType, AirdropExport, LeaderboardSnapshot, ParticipationEvent,
-    TestnetIncentivesConfig, TestnetIncentivesTracker, TotalStats, UserStats,
+    ActivityType, AirdropExport, LeaderboardSnapshot, ParticipationEvent, TestnetIncentivesConfig,
+    TestnetIncentivesTracker, TotalStats, UserStats,
 };
-pub use trie::{MerkleTrie, MerkleProof, TrieNode};
+pub use trie::{MerkleProof, MerkleTrie, TrieNode};
 
 use sha3::{Digest, Keccak256};
 use thiserror::Error;

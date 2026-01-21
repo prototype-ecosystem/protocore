@@ -204,7 +204,11 @@ impl std::fmt::Display for ConsensusEvent {
             ConsensusEvent::ProposeTimeout { height, round } => {
                 write!(f, "ProposeTimeout(h={}, r={})", height, round)
             }
-            ConsensusEvent::PrevoteQuorum { height, round, block_hash } => {
+            ConsensusEvent::PrevoteQuorum {
+                height,
+                round,
+                block_hash,
+            } => {
                 let hash_str = if *block_hash == [0u8; 32] {
                     "NIL".to_string()
                 } else {
@@ -215,19 +219,32 @@ impl std::fmt::Display for ConsensusEvent {
             ConsensusEvent::PrevoteTimeout { height, round } => {
                 write!(f, "PrevoteTimeout(h={}, r={})", height, round)
             }
-            ConsensusEvent::PrecommitQuorum { height, round, block_hash } => {
+            ConsensusEvent::PrecommitQuorum {
+                height,
+                round,
+                block_hash,
+            } => {
                 let hash_str = if *block_hash == [0u8; 32] {
                     "NIL".to_string()
                 } else {
                     hex::encode(&block_hash[..4])
                 };
-                write!(f, "PrecommitQuorum(h={}, r={}, {})", height, round, hash_str)
+                write!(
+                    f,
+                    "PrecommitQuorum(h={}, r={}, {})",
+                    height, round, hash_str
+                )
             }
             ConsensusEvent::PrecommitTimeout { height, round } => {
                 write!(f, "PrecommitTimeout(h={}, r={})", height, round)
             }
             ConsensusEvent::BlockCommitted { height, block_hash } => {
-                write!(f, "BlockCommitted(h={}, {})", height, hex::encode(&block_hash[..4]))
+                write!(
+                    f,
+                    "BlockCommitted(h={}, {})",
+                    height,
+                    hex::encode(&block_hash[..4])
+                )
             }
         }
     }
@@ -426,21 +443,27 @@ impl ConsensusStateMachine {
         match event {
             ConsensusEvent::NewHeight { height } => self.handle_new_height(height),
             ConsensusEvent::StartRound { height, round } => self.handle_start_round(height, round),
-            ConsensusEvent::ReceivedProposal { height, round, block_hash } => {
-                self.handle_received_proposal(height, round, block_hash)
-            }
+            ConsensusEvent::ReceivedProposal {
+                height,
+                round,
+                block_hash,
+            } => self.handle_received_proposal(height, round, block_hash),
             ConsensusEvent::ProposeTimeout { height, round } => {
                 self.handle_propose_timeout(height, round)
             }
-            ConsensusEvent::PrevoteQuorum { height, round, block_hash } => {
-                self.handle_prevote_quorum(height, round, block_hash)
-            }
+            ConsensusEvent::PrevoteQuorum {
+                height,
+                round,
+                block_hash,
+            } => self.handle_prevote_quorum(height, round, block_hash),
             ConsensusEvent::PrevoteTimeout { height, round } => {
                 self.handle_prevote_timeout(height, round)
             }
-            ConsensusEvent::PrecommitQuorum { height, round, block_hash } => {
-                self.handle_precommit_quorum(height, round, block_hash)
-            }
+            ConsensusEvent::PrecommitQuorum {
+                height,
+                round,
+                block_hash,
+            } => self.handle_precommit_quorum(height, round, block_hash),
             ConsensusEvent::PrecommitTimeout { height, round } => {
                 self.handle_precommit_timeout(height, round)
             }
@@ -482,7 +505,8 @@ impl ConsensusStateMachine {
         self.valid_round = None;
 
         // Prune old voted rounds
-        self.voted_rounds.retain(|(h, _, _)| *h >= height.saturating_sub(1));
+        self.voted_rounds
+            .retain(|(h, _, _)| *h >= height.saturating_sub(1));
 
         debug!(height = height, "Entered NewHeight state");
         Ok(Step::NewHeight)
@@ -504,7 +528,10 @@ impl ConsensusStateMachine {
         // Valid transitions: NewHeight -> Propose, or Precommit/Prevote/Propose -> Propose (round change)
         // Note: Propose -> Propose is valid when catching up to a higher round (e.g., received
         // proposal/votes for round N+1 while still waiting in Propose step of round N)
-        if !matches!(self.step, Step::NewHeight | Step::Precommit | Step::Prevote | Step::Propose) {
+        if !matches!(
+            self.step,
+            Step::NewHeight | Step::Precommit | Step::Prevote | Step::Propose
+        ) {
             return Err(StateMachineError::InvalidTransition {
                 from: self.step,
                 to: Step::Propose,
@@ -868,8 +895,11 @@ mod tests {
         assert_eq!(sm.height(), 1);
 
         // Start round 0
-        sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 0 })
-            .unwrap();
+        sm.apply_event(ConsensusEvent::StartRound {
+            height: 1,
+            round: 0,
+        })
+        .unwrap();
         assert_eq!(sm.step(), Step::Propose);
 
         // Receive proposal
@@ -918,22 +948,34 @@ mod tests {
         sm.initialize(1);
 
         // Start round 0
-        sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 0 })
-            .unwrap();
+        sm.apply_event(ConsensusEvent::StartRound {
+            height: 1,
+            round: 0,
+        })
+        .unwrap();
 
         // Propose timeout -> Prevote
-        sm.apply_event(ConsensusEvent::ProposeTimeout { height: 1, round: 0 })
-            .unwrap();
+        sm.apply_event(ConsensusEvent::ProposeTimeout {
+            height: 1,
+            round: 0,
+        })
+        .unwrap();
         assert_eq!(sm.step(), Step::Prevote);
 
         // Prevote timeout -> Precommit
-        sm.apply_event(ConsensusEvent::PrevoteTimeout { height: 1, round: 0 })
-            .unwrap();
+        sm.apply_event(ConsensusEvent::PrevoteTimeout {
+            height: 1,
+            round: 0,
+        })
+        .unwrap();
         assert_eq!(sm.step(), Step::Precommit);
 
         // Precommit timeout -> Next round
-        sm.apply_event(ConsensusEvent::PrecommitTimeout { height: 1, round: 0 })
-            .unwrap();
+        sm.apply_event(ConsensusEvent::PrecommitTimeout {
+            height: 1,
+            round: 0,
+        })
+        .unwrap();
         assert_eq!(sm.step(), Step::Propose);
         assert_eq!(sm.round(), 1);
     }
@@ -973,11 +1015,17 @@ mod tests {
         let mut sm = ConsensusStateMachine::new();
         sm.initialize(1);
 
-        sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 5 })
-            .unwrap();
+        sm.apply_event(ConsensusEvent::StartRound {
+            height: 1,
+            round: 5,
+        })
+        .unwrap();
 
         // Try to go to lower round
-        let result = sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 3 });
+        let result = sm.apply_event(ConsensusEvent::StartRound {
+            height: 1,
+            round: 3,
+        });
         assert!(matches!(
             result,
             Err(StateMachineError::RoundDecreased { .. })
@@ -993,9 +1041,7 @@ mod tests {
         sm.initialize(1);
 
         // Commit first block
-        sm.commit_history
-            .record_commit(1, block_hash_1)
-            .unwrap();
+        sm.commit_history.record_commit(1, block_hash_1).unwrap();
 
         // Try to commit different block at same height
         let result = sm.commit_history.record_commit(1, block_hash_2);
@@ -1074,26 +1120,38 @@ mod tests {
         sm.initialize(1);
 
         // Start round 0
-        sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 0 })
-            .unwrap();
+        sm.apply_event(ConsensusEvent::StartRound {
+            height: 1,
+            round: 0,
+        })
+        .unwrap();
         assert_eq!(sm.step(), Step::Propose);
         assert_eq!(sm.round(), 0);
 
         // Catch up to round 2 while still in Propose (received proposal/votes for higher round)
-        sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 2 })
-            .unwrap();
+        sm.apply_event(ConsensusEvent::StartRound {
+            height: 1,
+            round: 2,
+        })
+        .unwrap();
         assert_eq!(sm.step(), Step::Propose);
         assert_eq!(sm.round(), 2);
 
         // Cannot go back to lower round from Propose
-        let result = sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 1 });
+        let result = sm.apply_event(ConsensusEvent::StartRound {
+            height: 1,
+            round: 1,
+        });
         assert!(matches!(
             result,
             Err(StateMachineError::RoundDecreased { .. })
         ));
 
         // Cannot stay at same round from Propose
-        let result = sm.apply_event(ConsensusEvent::StartRound { height: 1, round: 2 });
+        let result = sm.apply_event(ConsensusEvent::StartRound {
+            height: 1,
+            round: 2,
+        });
         assert!(matches!(
             result,
             Err(StateMachineError::InvalidTransition { .. })

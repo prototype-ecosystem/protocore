@@ -87,7 +87,10 @@ fn test_get_set_storage() {
     let slot = [2u8; 32];
     let value = [3u8; 32];
 
-    assert_eq!(state.get_storage(&address, &slot), protocore_storage::ZERO_HASH);
+    assert_eq!(
+        state.get_storage(&address, &slot),
+        protocore_storage::ZERO_HASH
+    );
 
     state.set_storage(&address, &slot, value);
 

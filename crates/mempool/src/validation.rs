@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use protocore_types::{Address, SignedTransaction, H256};
+use protocore_types::{Address, SignedTransaction};
 use tracing::{debug, trace, warn};
 
 /// Configuration for transaction validation
@@ -427,14 +427,14 @@ impl<S: AccountStateProvider> TransactionValidator<S> {
         let value = tx.value();
 
         // Use checked arithmetic to prevent overflow
-        let gas_cost = gas_limit.checked_mul(max_fee).ok_or_else(|| {
+        let gas_cost = gas_limit.checked_mul(max_fee).ok_or({
             ValidationError::InsufficientBalance {
                 required: u128::MAX,
                 available: balance,
             }
         })?;
 
-        let required = gas_cost.checked_add(value).ok_or_else(|| {
+        let required = gas_cost.checked_add(value).ok_or({
             ValidationError::InsufficientBalance {
                 required: u128::MAX,
                 available: balance,

@@ -8,20 +8,22 @@ fn test_verify_args_default() {
     let args = VerifyArgs::parse_from(["verify"]);
     assert!(args.binary.is_none());
     assert_eq!(args.rpc, "http://127.0.0.1:8545");
-    assert!(!args.verbose);
+    assert!(!args.detailed);
 }
 
 #[test]
 fn test_verify_args_with_options() {
     let args = VerifyArgs::parse_from([
         "verify",
-        "--binary", "/path/to/binary",
-        "--rpc", "http://localhost:9000",
-        "--verbose"
+        "--binary",
+        "/path/to/binary",
+        "--rpc",
+        "http://localhost:9000",
+        "--detailed",
     ]);
     assert_eq!(args.binary, Some("/path/to/binary".to_string()));
     assert_eq!(args.rpc, "http://localhost:9000");
-    assert!(args.verbose);
+    assert!(args.detailed);
 }
 
 // Note: format_time_remaining and compute_sha256 are private functions.

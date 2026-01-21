@@ -9,7 +9,10 @@
 //! - [`FinalityCert`] - Proof of block finality
 //! - [`Validator`] and [`ValidatorSet`] - Validator management
 
-use protocore_crypto::{bls::{BlsPublicKey, BlsSignature}, Hash};
+use protocore_crypto::{
+    bls::{BlsPublicKey, BlsSignature},
+    Hash,
+};
 use protocore_types::{Block, H256};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
@@ -51,7 +54,10 @@ pub struct ChainContext {
 impl ChainContext {
     /// Create a new chain context
     pub const fn new(chain_id: u64, genesis_hash: Hash) -> Self {
-        Self { chain_id, genesis_hash }
+        Self {
+            chain_id,
+            genesis_hash,
+        }
     }
 
     /// Create chain context for testnet (default genesis)
@@ -131,7 +137,7 @@ impl Step {
             Step::NewHeight => &[Step::Propose],
             Step::Propose => &[Step::Prevote, Step::Propose], // Propose for round catch-up
             Step::Prevote => &[Step::Precommit, Step::Propose], // Propose for round timeout
-            Step::Precommit => &[Step::Commit, Step::Propose],  // Propose for round timeout
+            Step::Precommit => &[Step::Commit, Step::Propose], // Propose for round timeout
             Step::Commit => &[Step::NewHeight],
         }
     }
@@ -393,10 +399,7 @@ impl FinalityCert {
 
     /// Get the number of signers
     pub fn signer_count(&self) -> u32 {
-        self.signers_bitmap
-            .iter()
-            .map(|b| b.count_ones())
-            .sum()
+        self.signers_bitmap.iter().map(|b| b.count_ones()).sum()
     }
 }
 
@@ -455,7 +458,7 @@ impl Validator {
 }
 
 /// Set of active validators for a consensus epoch
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ValidatorSet {
     /// Ordered list of validators (index = ValidatorId)
     pub validators: Vec<Validator>,
@@ -494,19 +497,19 @@ impl ValidatorSet {
         let mut hasher = Keccak256::new();
 
         // Include validator count
-        hasher.update(&(self.len() as u64).to_le_bytes());
+        hasher.update((self.len() as u64).to_le_bytes());
 
         // Include total stake for quorum verification
-        hasher.update(&self.total_stake.to_le_bytes());
+        hasher.update(self.total_stake.to_le_bytes());
 
         // Include each validator's data (validators are already sorted by id)
         for validator in &self.validators {
-            hasher.update(&validator.id.to_le_bytes());
-            hasher.update(&validator.pubkey.to_bytes());
-            hasher.update(&validator.address);
-            hasher.update(&validator.stake.to_le_bytes());
-            hasher.update(&validator.commission.to_le_bytes());
-            hasher.update(&[validator.active as u8]);
+            hasher.update(validator.id.to_le_bytes());
+            hasher.update(validator.pubkey.to_bytes());
+            hasher.update(validator.address);
+            hasher.update(validator.stake.to_le_bytes());
+            hasher.update(validator.commission.to_le_bytes());
+            hasher.update([validator.active as u8]);
         }
 
         let result = hasher.finalize();
@@ -578,15 +581,6 @@ impl ValidatorSet {
     /// For n = 3f + 1, we need at least 2f + 1 honest validators
     pub fn min_honest(&self) -> usize {
         self.validators.len() - self.max_byzantine()
-    }
-}
-
-impl Default for ValidatorSet {
-    fn default() -> Self {
-        Self {
-            validators: Vec::new(),
-            total_stake: 0,
-        }
     }
 }
 

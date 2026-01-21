@@ -143,8 +143,6 @@ fn test_account_state_empty() {
 
 #[test]
 fn test_account_state_contract() {
-    use protocore_light_client::constants::EMPTY_HASH;
-
     let account = AccountState {
         nonce: 1,
         balance: 0,

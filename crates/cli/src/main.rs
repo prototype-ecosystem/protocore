@@ -4,7 +4,7 @@
 //! It provides all tools needed to interact with Proto Core nodes.
 
 use clap::Parser;
-use protocore_cli::{commands::Cli, commands::run_cli};
+use protocore_cli::{commands::run_cli, commands::Cli};
 use std::process;
 
 #[tokio::main]
