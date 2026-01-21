@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
@@ -447,6 +448,7 @@ impl ValidatorNode {
             let database = Arc::clone(self.node.database());
             let state_db = Arc::clone(self.node.state_db());
             let mempool = Arc::clone(self.node.mempool());
+            let block_time_ms = self.config.consensus.block_time_ms;
             tokio::spawn(async move {
                 while let Some(committed) = rx.recv().await {
                     let height = committed.block.header.height;
@@ -574,6 +576,17 @@ impl ValidatorNode {
 
                     // Broadcast committed block event
                     let _ = committed_tx.send(committed.clone());
+
+                    // Wait for block time before starting next height
+                    // This ensures proper block timing and allows other validators to sync
+                    if block_time_ms > 0 {
+                        debug!(
+                            height = height,
+                            block_time_ms = block_time_ms,
+                            "Waiting for block time before next height"
+                        );
+                        tokio::time::sleep(Duration::from_millis(block_time_ms)).await;
+                    }
 
                     // Start next height consensus
                     let parent_hash: [u8; 32] = hash.into();
