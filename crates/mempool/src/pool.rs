@@ -681,18 +681,25 @@ impl<S: AccountStateProvider> Mempool<S> {
     }
 
     /// Get the next pending nonce for a sender
+    ///
+    /// Returns the first nonce that is not yet in the pending pool,
+    /// starting from the account's current on-chain nonce.
     fn get_pending_nonce_inner(
         &self,
         inner: &MempoolInner,
         sender: &Address,
         account_nonce: u64,
     ) -> u64 {
-        inner
-            .pending_by_sender
-            .get(sender)
-            .and_then(|nonces| nonces.keys().max())
-            .map(|max_nonce| max_nonce + 1)
-            .unwrap_or(account_nonce)
+        let mut expected = account_nonce;
+
+        if let Some(nonces) = inner.pending_by_sender.get(sender) {
+            // Find the first gap in the nonce sequence
+            while nonces.contains_key(&expected) {
+                expected += 1;
+            }
+        }
+
+        expected
     }
 
     /// Ensure there's capacity for a new transaction
