@@ -441,12 +441,13 @@ impl<S: AccountStateProvider> Mempool<S> {
         inner.total_bytes += pending_tx.size;
         inner.total_count += 1;
 
-        debug!(
+        info!(
             tx_hash = ?hash,
             sender = ?pending_tx.sender,
             nonce = pending_tx.nonce(),
             gas_price = pending_tx.gas_price,
             is_pending = is_pending,
+            account_nonce = account_nonce,
             "transaction added to mempool"
         );
 
@@ -824,6 +825,14 @@ impl<S: AccountStateProvider> Mempool<S> {
         let mut gas_used = 0u64;
         let mut included_nonces: HashMap<Address, u64> = HashMap::new();
 
+        // Log pool state for debugging
+        info!(
+            pending_by_price_count = inner.pending_by_price.len(),
+            by_hash_count = inner.by_hash.len(),
+            total_count = inner.total_count,
+            "get_pending_transactions called"
+        );
+
         // Iterate by gas price (highest first)
         for price_key in &inner.pending_by_price {
             let hash = price_key.hash;
@@ -833,6 +842,7 @@ impl<S: AccountStateProvider> Mempool<S> {
 
                 // Check if fits in gas limit
                 if gas_used.saturating_add(tx_gas) > gas_limit {
+                    info!(tx_hash = ?hash, tx_gas = tx_gas, gas_used = gas_used, gas_limit = gas_limit, "skipping tx: exceeds gas limit");
                     continue;
                 }
 
@@ -844,10 +854,19 @@ impl<S: AccountStateProvider> Mempool<S> {
                     .unwrap_or(account_nonce);
 
                 if pending.nonce() != expected_nonce {
+                    info!(
+                        tx_hash = ?hash,
+                        sender = ?pending.sender,
+                        tx_nonce = pending.nonce(),
+                        expected_nonce = expected_nonce,
+                        account_nonce = account_nonce,
+                        "skipping tx: nonce mismatch"
+                    );
                     continue;
                 }
 
                 // Include this transaction
+                info!(tx_hash = ?hash, nonce = pending.nonce(), "including tx in block");
                 result.push(pending.tx.clone());
                 gas_used += tx_gas;
                 included_nonces.insert(pending.sender, pending.nonce() + 1);
@@ -856,6 +875,8 @@ impl<S: AccountStateProvider> Mempool<S> {
                 if gas_used >= gas_limit {
                     break;
                 }
+            } else {
+                info!(tx_hash = ?hash, "tx in pending_by_price but not in by_hash");
             }
         }
 
