@@ -521,6 +521,40 @@ impl ValidatorNode {
                         error!(error = %e, "Failed to persist committed block");
                     }
 
+                    // Store transaction indexes and receipts
+                    for (tx_index, tx) in committed.block.transactions.iter().enumerate() {
+                        let tx_hash = tx.hash();
+
+                        // Create transaction location data: block_hash + block_height + tx_index
+                        let mut tx_location = Vec::with_capacity(32 + 8 + 8);
+                        tx_location.extend_from_slice(hash.as_bytes());
+                        tx_location.extend_from_slice(&height.to_le_bytes());
+                        tx_location.extend_from_slice(&(tx_index as u64).to_le_bytes());
+
+                        if let Err(e) = database.put_transaction(tx_hash.as_bytes(), &tx_location) {
+                            error!(error = %e, tx_hash = %hex::encode(&tx_hash.as_bytes()[..8]), "Failed to store transaction");
+                        }
+
+                        // Create receipt data: tx_hash(32) + block_hash(32) + block_height(8) + tx_index(8) + status(1) + gas_used(8)
+                        let mut receipt_data = Vec::with_capacity(89);
+                        receipt_data.extend_from_slice(tx_hash.as_bytes());
+                        receipt_data.extend_from_slice(hash.as_bytes());
+                        receipt_data.extend_from_slice(&height.to_le_bytes());
+                        receipt_data.extend_from_slice(&(tx_index as u64).to_le_bytes());
+                        receipt_data.push(1u8); // success status
+                        receipt_data.extend_from_slice(&21000u64.to_le_bytes()); // gas_used placeholder
+
+                        if let Err(e) = database.put_receipt(tx_hash.as_bytes(), &receipt_data) {
+                            error!(error = %e, tx_hash = %hex::encode(&tx_hash.as_bytes()[..8]), "Failed to store receipt");
+                        }
+
+                        debug!(
+                            tx_hash = %hex::encode(&tx_hash.as_bytes()[..8]),
+                            tx_index = tx_index,
+                            "Stored transaction and receipt"
+                        );
+                    }
+
                     // Update latest height metadata
                     if let Err(e) = database.put_metadata(b"latest_height", &height.to_le_bytes()) {
                         error!(error = %e, "Failed to update latest height");
