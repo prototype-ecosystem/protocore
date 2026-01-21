@@ -831,18 +831,32 @@ impl<S: AccountStateProvider> Mempool<S> {
         let mut included_nonces: HashMap<Address, u64> = HashMap::new();
 
         // Log pool state for debugging
-        let pending_count = inner.pending_by_price.len();
+        let pending_price_count = inner.pending_by_price.len();
+        let pending_sender_count: usize = inner.pending_by_sender.values().map(|m| m.len()).sum();
         let queued_count: usize = inner.queued_by_sender.values().map(|m| m.len()).sum();
+        let by_hash_count = inner.by_hash.len();
         let total_count = inner.total_count;
 
-        if pending_count > 0 || queued_count > 0 {
+        if pending_price_count > 0 || queued_count > 0 || by_hash_count > 0 {
             info!(
-                pending_count = pending_count,
+                pending_price_count = pending_price_count,
+                pending_sender_count = pending_sender_count,
                 queued_count = queued_count,
+                by_hash_count = by_hash_count,
                 total_count = total_count,
                 gas_limit = gas_limit,
                 "get_pending_transactions called"
             );
+
+            // Log individual entries for debugging
+            for price_key in inner.pending_by_price.iter().take(5) {
+                let in_by_hash = inner.by_hash.contains_key(&price_key.hash);
+                info!(
+                    hash = %price_key.hash,
+                    in_by_hash = in_by_hash,
+                    "pending_by_price entry"
+                );
+            }
         }
 
         // Iterate by gas price (highest first)
