@@ -393,6 +393,37 @@ impl StateProvider for RpcStateAdapter {
         // Calculate cumulative gas (simplified - just use gas_used for now)
         let cumulative_gas_used = gas_used;
 
+        // Calculate contract address for contract creation transactions
+        // Contract address = keccak256(RLP([sender, nonce]))[12:]
+        let contract_address = if to.is_none() {
+            // This is a contract creation transaction
+            if let Some(ref blk) = block {
+                if let Some(tx) = blk.transactions.get(tx_index as usize) {
+                    let sender = tx.sender().unwrap_or_default();
+                    let nonce = tx.nonce();
+
+                    // RLP encode [sender, nonce]
+                    use rlp::RlpStream;
+                    let mut stream = RlpStream::new_list(2);
+                    stream.append(&sender.as_bytes());
+                    stream.append(&nonce);
+                    let encoded = stream.out();
+
+                    // Calculate keccak256 hash and take last 20 bytes
+                    let hash = protocore_crypto::keccak256(&encoded);
+                    let mut addr = [0u8; 20];
+                    addr.copy_from_slice(&hash[12..32]);
+                    Some(protocore_rpc::Address(addr))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         Ok(Some(RpcReceipt {
             transaction_hash: protocore_rpc::H256(tx_hash),
             transaction_index: HexU64(tx_index),
@@ -402,7 +433,7 @@ impl StateProvider for RpcStateAdapter {
             to,
             cumulative_gas_used: HexU64(cumulative_gas_used),
             gas_used: HexU64(gas_used),
-            contract_address: None, // TODO: Set if contract creation
+            contract_address,
             logs: vec![],           // TODO: Populate from EVM execution
             logs_bloom: HexBytes(vec![0u8; 256]),
             status: HexU64(status as u64),
@@ -449,13 +480,14 @@ impl StateProvider for RpcStateAdapter {
         let to = tx.to.map(|a| AlloyAddress::from_slice(&a.0));
 
         // Load sender account state into memory db
+        // For eth_call (read-only), we give the sender unlimited balance since no actual
+        // funds are spent. This allows calls from any address without balance requirements.
         let from_bytes: [u8; 20] = from.0.into();
-        let sender_balance = self.state_db.get_balance(&from_bytes);
         let sender_nonce = self.state_db.get_nonce(&from_bytes);
         memory_db.insert_account(
             from,
             AccountInfo {
-                balance: U256::from(sender_balance),
+                balance: U256::MAX, // Unlimited balance for read-only calls
                 nonce: sender_nonce,
                 ..Default::default()
             },
