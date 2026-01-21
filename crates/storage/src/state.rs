@@ -205,10 +205,25 @@ impl StateDB {
         account
     }
 
-    /// Load account from the state trie
+    /// Load account from the state trie or database
     fn load_account_from_trie(&self, address: &Address) -> Option<Account> {
-        self.state_trie
+        // First try the in-memory trie
+        if let Some(account) = self
+            .state_trie
             .get(address)
+            .ok()
+            .flatten()
+            .and_then(|data| Account::decode(&data).ok())
+        {
+            return Some(account);
+        }
+
+        // Fall back to database if not in trie
+        // This handles the case where the node restarts and the trie is empty
+        // but accounts were persisted to the database
+        let key = self.account_db_key(address);
+        self.db
+            .get(cf::STATE, &key)
             .ok()
             .flatten()
             .and_then(|data| Account::decode(&data).ok())
