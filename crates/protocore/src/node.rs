@@ -63,6 +63,127 @@ impl AccountStateProvider for StateDBAdapter {
 }
 
 // =============================================================================
+// Hybrid Database for eth_call
+// =============================================================================
+
+/// A hybrid database for eth_call that combines MemoryDb (for account overrides)
+/// with StateDB (for contract storage access).
+///
+/// This allows eth_call to:
+/// - Override sender balance (unlimited for read-only calls)
+/// - Read actual contract storage from the state database
+pub struct HybridDb {
+    /// Memory database for account overrides
+    memory_db: MemoryDb,
+    /// State database for storage access
+    state_db: Arc<StateDB>,
+}
+
+impl HybridDb {
+    /// Create a new hybrid database
+    pub fn new(memory_db: MemoryDb, state_db: Arc<StateDB>) -> Self {
+        Self { memory_db, state_db }
+    }
+
+    /// Insert an account (delegates to memory_db)
+    pub fn insert_account(&mut self, address: AlloyAddress, account: AccountInfo) {
+        self.memory_db.insert_account(address, account);
+    }
+
+    /// Insert code (delegates to memory_db)
+    pub fn insert_code(&mut self, code: revm::primitives::Bytecode) -> B256 {
+        self.memory_db.insert_code(code)
+    }
+}
+
+/// Error type for HybridDb
+#[derive(Debug)]
+pub enum HybridDbError {
+    /// Code not found
+    CodeNotFound(B256),
+}
+
+impl std::fmt::Display for HybridDbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HybridDbError::CodeNotFound(hash) => write!(f, "Code not found: {}", hash),
+        }
+    }
+}
+
+impl std::error::Error for HybridDbError {}
+
+impl revm::Database for HybridDb {
+    type Error = HybridDbError;
+
+    fn basic(&mut self, address: AlloyAddress) -> Result<Option<AccountInfo>, Self::Error> {
+        // First check memory_db for overridden accounts
+        if let Some(account) = self.memory_db.accounts().get(&address) {
+            return Ok(Some(account.clone()));
+        }
+
+        // Fall back to state_db
+        let addr_bytes: [u8; 20] = address.0.into();
+        if let Some(account) = self.state_db.get_account(&addr_bytes) {
+            let code_hash = if account.code_hash == [0u8; 32] {
+                B256::ZERO
+            } else {
+                B256::from_slice(&account.code_hash)
+            };
+            Ok(Some(AccountInfo {
+                balance: U256::from(account.balance),
+                nonce: account.nonce,
+                code_hash,
+                code: None,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<revm::primitives::Bytecode, Self::Error> {
+        // First check memory_db for code (we loaded contract code there)
+        if let Some(code) = self.memory_db.code().get(&code_hash) {
+            return Ok(code.clone());
+        }
+
+        // Fall back to state_db
+        if let Some(code) = self.state_db.get_code(&code_hash.0) {
+            Ok(revm::primitives::Bytecode::new_raw(Bytes::from(code)))
+        } else {
+            Err(HybridDbError::CodeNotFound(code_hash))
+        }
+    }
+
+    fn storage(&mut self, address: AlloyAddress, index: U256) -> Result<U256, Self::Error> {
+        // Always read storage from state_db (actual contract state)
+        let addr_bytes: [u8; 20] = address.0.into();
+        let slot_bytes: [u8; 32] = index.to_be_bytes();
+        let value = self.state_db.get_storage(&addr_bytes, &slot_bytes);
+        Ok(U256::from_be_bytes(value))
+    }
+
+    fn block_hash(&mut self, _number: u64) -> Result<B256, Self::Error> {
+        // Not typically needed for eth_call
+        Ok(B256::ZERO)
+    }
+}
+
+impl revm::DatabaseCommit for HybridDb {
+    fn commit(&mut self, _changes: revm::primitives::HashMap<AlloyAddress, revm::primitives::Account>) {
+        // For eth_call, we don't commit changes (read-only)
+        // Changes are discarded after the call
+    }
+}
+
+impl protocore_evm::StateRootProvider for HybridDb {
+    fn state_root(&self) -> B256 {
+        // For eth_call, we don't need a real state root
+        B256::ZERO
+    }
+}
+
+// =============================================================================
 // RPC State Provider Adapters
 // =============================================================================
 
@@ -467,7 +588,7 @@ impl StateProvider for RpcStateAdapter {
         // Get block height for context
         let height = self.resolve_block_number(block)?;
 
-        // Create a MemoryDb and populate with relevant account state
+        // Create a MemoryDb for account overrides
         let mut memory_db = MemoryDb::new();
 
         // Get sender address (default to zero address if not specified)
@@ -493,7 +614,7 @@ impl StateProvider for RpcStateAdapter {
             },
         );
 
-        // Load recipient account state if it exists
+        // Load recipient account state if it exists (for code access)
         if let Some(to_addr) = to {
             let to_bytes: [u8; 20] = to_addr.0.into();
             let to_balance = self.state_db.get_balance(&to_bytes);
@@ -537,14 +658,19 @@ impl StateProvider for RpcStateAdapter {
             }
         }
 
+        // Create HybridDb that uses MemoryDb for accounts but StateDB for storage
+        // This allows eth_call to read actual contract storage while still giving
+        // the sender unlimited balance for read-only calls.
+        let hybrid_db = HybridDb::new(memory_db, self.state_db.clone());
+
         // Create EVM config
         let evm_config = EvmConfig {
             chain_id: self.chain_id,
             ..EvmConfig::default()
         };
 
-        // Create executor
-        let mut executor = EvmExecutor::new(memory_db, evm_config);
+        // Create executor with hybrid database
+        let mut executor = EvmExecutor::new(hybrid_db, evm_config);
 
         // Build transaction data
         let input_data = tx

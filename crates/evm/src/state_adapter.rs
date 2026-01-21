@@ -276,6 +276,16 @@ impl MemoryDb {
     pub fn insert_block_hash(&mut self, number: u64, hash: B256) {
         self.block_hashes.insert(number, hash);
     }
+
+    /// Get a reference to the accounts map
+    pub fn accounts(&self) -> &HashMap<Address, AccountInfo> {
+        &self.accounts
+    }
+
+    /// Get a reference to the code map
+    pub fn code(&self) -> &HashMap<B256, Bytecode> {
+        &self.code
+    }
 }
 
 /// Error type for MemoryDb
