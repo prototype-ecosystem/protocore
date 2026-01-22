@@ -155,7 +155,7 @@ fn test_consensus_engine_creation() {
         BlockBuilder, BlockValidator, CommittedBlock, ConsensusMessage, TimeoutInfo,
     };
     use protocore_consensus::{ConsensusEngine, TimeoutConfig, Validator, ValidatorSet};
-    use protocore_types::{Block, BlockHeader, H256};
+    use protocore_types::{Address, Block, BlockHeader, H256};
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -177,10 +177,11 @@ fn test_consensus_engine_creation() {
 
     #[async_trait]
     impl BlockBuilder for MockBlockBuilder {
-        async fn build_block(&self, height: u64, parent_hash: Hash) -> Block {
+        async fn build_block(&self, height: u64, parent_hash: Hash, proposer: Address) -> Block {
             let mut header = BlockHeader::default();
             header.height = height;
             header.parent_hash = H256::from(parent_hash);
+            header.proposer = proposer;
             Block::new(header, Vec::new())
         }
     }

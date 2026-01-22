@@ -97,17 +97,28 @@ impl revm::Database for ExecutionDb {
             } else {
                 B256::from_slice(&account.code_hash)
             };
+
+            // Load contract code if it exists - revm requires code field set for execution
+            let code = if code_hash != B256::ZERO {
+                self.state_db.get_code(&account.code_hash).map(|c| {
+                    revm::primitives::Bytecode::new_raw(Bytes::from(c))
+                })
+            } else {
+                None
+            };
+
             info!(
                 address = %address,
                 code_hash = %code_hash,
                 nonce = account.nonce,
+                has_code = code.is_some(),
                 "ExecutionDb::basic - loading from StateDB"
             );
             Ok(Some(AccountInfo {
                 balance: U256::from(account.balance),
                 nonce: account.nonce,
                 code_hash,
-                code: None,
+                code,
             }))
         } else {
             info!(
@@ -689,16 +700,24 @@ impl ValidatorNode {
                                 if let Some(account) = state_db.get_account(to.as_fixed_bytes()) {
                                     if let Some(code) = state_db.get_code(&account.code_hash) {
                                         if !code.is_empty() {
-                                            let bytecode = revm::primitives::Bytecode::new_raw(Bytes::from(code));
-                                            let code_hash = exec_db.insert_code(bytecode);
+                                            let bytecode = revm::primitives::Bytecode::new_raw(Bytes::from(code.clone()));
+                                            let code_hash = bytecode.hash_slow();
+                                            exec_db.insert_code(bytecode.clone());
+                                            // IMPORTANT: Must set code field explicitly for revm to execute
                                             exec_db.insert_account(
                                                 to_alloy,
                                                 AccountInfo {
                                                     balance: U256::from(to_balance),
                                                     nonce: to_nonce,
                                                     code_hash,
-                                                    ..Default::default()
+                                                    code: Some(bytecode),
                                                 },
+                                            );
+                                            info!(
+                                                contract = %to_alloy,
+                                                code_len = code.len(),
+                                                code_hash = %code_hash,
+                                                "Loaded contract bytecode for EVM execution"
                                             );
                                         }
                                     }

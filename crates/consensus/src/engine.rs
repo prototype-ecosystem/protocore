@@ -31,7 +31,7 @@ use protocore_crypto::{
     bls::{BlsPrivateKey, BlsSignature},
     Hash,
 };
-use protocore_types::Block;
+use protocore_types::{Address, Block};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
 
@@ -105,8 +105,8 @@ pub trait BlockValidator: Send + Sync {
 /// Trait for block building (implemented by mempool/block builder)
 #[async_trait]
 pub trait BlockBuilder: Send + Sync {
-    /// Build a new block for the given height
-    async fn build_block(&self, height: u64, parent_hash: Hash) -> Block;
+    /// Build a new block for the given height with the given proposer
+    async fn build_block(&self, height: u64, parent_hash: Hash, proposer: Address) -> Block;
 }
 
 /// Current consensus state
@@ -408,15 +408,22 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
 
     /// Create and broadcast a proposal (when we are the proposer)
     async fn do_propose(&self) {
-        let (height, round, valid_value, valid_round, parent_hash) = {
+        let (height, round, valid_value, valid_round, parent_hash, proposer_address) = {
             let state = self.state.read();
             let parent = *self.parent_hash.read();
+            // Get our address from the validator set
+            let vs = self.validator_set.read();
+            let our_address = vs
+                .get_validator(self.validator_id)
+                .map(|v| Address::from(v.address))
+                .unwrap_or(Address::ZERO);
             (
                 state.height,
                 state.round,
                 state.valid_value.clone(),
                 state.valid_round,
                 parent,
+                our_address,
             )
         };
 
@@ -426,7 +433,9 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
             valid
         } else {
             debug!(height = height, round = round, "Building new block");
-            self.block_builder.build_block(height, parent_hash).await
+            self.block_builder
+                .build_block(height, parent_hash, proposer_address)
+                .await
         };
 
         let block_hash = block.hash();

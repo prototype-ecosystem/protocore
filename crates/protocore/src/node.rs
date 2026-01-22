@@ -130,11 +130,21 @@ impl revm::Database for HybridDb {
             } else {
                 B256::from_slice(&account.code_hash)
             };
+
+            // Load contract code if it exists - revm requires code field set for execution
+            let code = if code_hash != B256::ZERO {
+                self.state_db.get_code(&account.code_hash).map(|c| {
+                    revm::primitives::Bytecode::new_raw(Bytes::from(c))
+                })
+            } else {
+                None
+            };
+
             Ok(Some(AccountInfo {
                 balance: U256::from(account.balance),
                 nonce: account.nonce,
                 code_hash,
-                code: None,
+                code,
             }))
         } else {
             Ok(None)
@@ -142,6 +152,11 @@ impl revm::Database for HybridDb {
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<revm::primitives::Bytecode, Self::Error> {
+        // Zero hash means no code (EOA or precompile) - return empty bytecode
+        if code_hash == B256::ZERO {
+            return Ok(revm::primitives::Bytecode::new());
+        }
+
         // First check memory_db for code (we loaded contract code there)
         if let Some(code) = self.memory_db.code().get(&code_hash) {
             return Ok(code.clone());
@@ -151,7 +166,9 @@ impl revm::Database for HybridDb {
         if let Some(code) = self.state_db.get_code(&code_hash.0) {
             Ok(revm::primitives::Bytecode::new_raw(Bytes::from(code)))
         } else {
-            Err(HybridDbError::CodeNotFound(code_hash))
+            // For precompiles and unknown addresses, return empty bytecode
+            // The EVM will handle precompiles through its precompile registry
+            Ok(revm::primitives::Bytecode::new())
         }
     }
 
@@ -625,14 +642,16 @@ impl StateProvider for RpcStateAdapter {
                 if let Some(code) = self.state_db.get_code(&account.code_hash) {
                     if !code.is_empty() {
                         let bytecode = revm::primitives::Bytecode::new_raw(Bytes::from(code));
-                        let code_hash = memory_db.insert_code(bytecode);
+                        let code_hash = bytecode.hash_slow();
+                        memory_db.insert_code(bytecode.clone());
+                        // IMPORTANT: Must set code field explicitly for revm to execute
                         memory_db.insert_account(
                             to_addr,
                             AccountInfo {
                                 balance: U256::from(to_balance),
                                 nonce: to_nonce,
                                 code_hash,
-                                ..Default::default()
+                                code: Some(bytecode),
                             },
                         );
                     } else {
@@ -641,7 +660,8 @@ impl StateProvider for RpcStateAdapter {
                             AccountInfo {
                                 balance: U256::from(to_balance),
                                 nonce: to_nonce,
-                                ..Default::default()
+                                code_hash: B256::ZERO,
+                                code: None,
                             },
                         );
                     }
@@ -651,7 +671,8 @@ impl StateProvider for RpcStateAdapter {
                         AccountInfo {
                             balance: U256::from(to_balance),
                             nonce: to_nonce,
-                            ..Default::default()
+                            code_hash: B256::ZERO,
+                            code: None,
                         },
                     );
                 }
@@ -792,14 +813,16 @@ impl StateProvider for RpcStateAdapter {
                 if let Some(code) = self.state_db.get_code(&account.code_hash) {
                     if !code.is_empty() {
                         let bytecode = revm::primitives::Bytecode::new_raw(Bytes::from(code));
-                        let code_hash = memory_db.insert_code(bytecode);
+                        let code_hash = bytecode.hash_slow();
+                        memory_db.insert_code(bytecode.clone());
+                        // IMPORTANT: Must set code field explicitly for revm to execute
                         memory_db.insert_account(
                             to_addr,
                             AccountInfo {
                                 balance: U256::from(to_balance),
                                 nonce: to_nonce,
                                 code_hash,
-                                ..Default::default()
+                                code: Some(bytecode),
                             },
                         );
                     } else {
@@ -808,7 +831,8 @@ impl StateProvider for RpcStateAdapter {
                             AccountInfo {
                                 balance: U256::from(to_balance),
                                 nonce: to_nonce,
-                                ..Default::default()
+                                code_hash: B256::ZERO,
+                                code: None,
                             },
                         );
                     }
@@ -818,7 +842,8 @@ impl StateProvider for RpcStateAdapter {
                         AccountInfo {
                             balance: U256::from(to_balance),
                             nonce: to_nonce,
-                            ..Default::default()
+                            code_hash: B256::ZERO,
+                            code: None,
                         },
                     );
                 }
@@ -1466,7 +1491,7 @@ impl NodeBlockBuilder {
 
 #[async_trait::async_trait]
 impl BlockBuilder for NodeBlockBuilder {
-    async fn build_block(&self, height: u64, parent_hash: CryptoHash) -> Block {
+    async fn build_block(&self, height: u64, parent_hash: CryptoHash, proposer: Address) -> Block {
         // Get pending transactions from mempool
         let txs = self.mempool.get_pending_transactions(self.gas_limit);
 
@@ -1475,6 +1500,7 @@ impl BlockBuilder for NodeBlockBuilder {
             height = height,
             pending_txs = txs.len(),
             gas_limit = self.gas_limit,
+            proposer = %proposer,
             "Building block"
         );
 
@@ -1499,7 +1525,7 @@ impl BlockBuilder for NodeBlockBuilder {
                 transactions_root: H256::NIL,
                 state_root: H256::NIL,
                 receipts_root: H256::NIL,
-                proposer: Address::ZERO, // Will be set by consensus
+                proposer,
                 gas_limit,
                 gas_used: 0,
                 base_fee,

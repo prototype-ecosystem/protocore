@@ -6,7 +6,7 @@ use protocore_consensus::types::{CommittedBlock, ConsensusMessage, Validator, Va
 use protocore_consensus::{BlockBuilder, BlockValidator, ConsensusEngine, ConsensusState, Step};
 use protocore_crypto::bls::BlsPrivateKey;
 use protocore_crypto::Hash;
-use protocore_types::{Block, BlockHeader};
+use protocore_types::{Address, Block, BlockHeader};
 
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -25,11 +25,12 @@ struct MockBlockBuilder;
 
 #[async_trait]
 impl BlockBuilder for MockBlockBuilder {
-    async fn build_block(&self, height: u64, parent_hash: Hash) -> Block {
+    async fn build_block(&self, height: u64, parent_hash: Hash, proposer: Address) -> Block {
         Block {
             header: BlockHeader {
                 height,
                 parent_hash: parent_hash.into(),
+                proposer,
                 ..Default::default()
             },
             transactions: vec![],
