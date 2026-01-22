@@ -246,16 +246,29 @@ where
     DB::Error: std::fmt::Debug,
 {
     fn commit(&mut self, changes: HashMap<Address, revm::primitives::Account>) {
-        trace!(changes = changes.len(), "Committing state changes");
+        tracing::info!(changes_count = changes.len(), "StateAdapter::commit called");
 
         // Merge pending changes with the new changes
         for (address, account) in changes {
+            tracing::info!(
+                address = %address,
+                storage_len = account.storage.len(),
+                status = ?account.status,
+                "Processing account in commit"
+            );
+
             // Update account info
             self.pending_accounts.insert(address, account.info.clone());
 
             // Update storage
             let storage_changes = self.pending_storage.entry(address).or_default();
             for (slot, value) in account.storage {
+                tracing::info!(
+                    address = %address,
+                    slot = %slot,
+                    value = %value.present_value,
+                    "Storing slot change"
+                );
                 storage_changes.insert(slot, value.present_value);
             }
         }
