@@ -617,6 +617,14 @@ impl ValidatorNode {
 
                         if has_data || is_contract_creation {
                             // Execute via EVM for contract interactions
+                            info!(
+                                tx_hash = %hex::encode(&tx.hash().as_bytes()[..8]),
+                                has_data = has_data,
+                                is_contract_creation = is_contract_creation,
+                                data_len = tx.data().len(),
+                                "Executing transaction via EVM"
+                            );
+
                             // Create ExecutionDb that reads from StateDB and tracks writes
                             let mut exec_db = ExecutionDb::new(Arc::clone(&state_db));
 
@@ -772,24 +780,36 @@ impl ValidatorNode {
                                     }
 
                                     // Apply storage changes from EVM execution
-                                    // The EVM executor commits changes to its internal MemoryDb
+                                    // The EVM executor commits changes to its internal StateAdapter
                                     // We need to extract and apply those to StateDB
                                     let db = executor.db();
                                     let changes = db.pending_changes();
 
+                                    info!(
+                                        tx_hash = %hex::encode(&tx.hash().as_bytes()[..8]),
+                                        changes_count = changes.len(),
+                                        "Applying EVM storage changes"
+                                    );
+
                                     for (address, account_changes) in changes {
                                         let addr_bytes: [u8; 20] = address.0.into();
+
+                                        info!(
+                                            address = %hex::encode(&addr_bytes),
+                                            storage_changes = account_changes.storage.len(),
+                                            "Processing account changes"
+                                        );
 
                                         // Apply storage changes
                                         for (slot, value) in &account_changes.storage {
                                             let slot_bytes: [u8; 32] = slot.to_be_bytes();
                                             let value_bytes: [u8; 32] = value.to_be_bytes();
                                             state_db.set_storage(&addr_bytes, &slot_bytes, value_bytes);
-                                            debug!(
+                                            info!(
                                                 address = %hex::encode(&addr_bytes),
                                                 slot = %hex::encode(&slot_bytes),
                                                 value = %hex::encode(&value_bytes),
-                                                "Storage updated"
+                                                "Storage slot updated"
                                             );
                                         }
                                     }
