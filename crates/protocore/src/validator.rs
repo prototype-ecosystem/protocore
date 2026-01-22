@@ -81,6 +81,11 @@ impl revm::Database for ExecutionDb {
     fn basic(&mut self, address: AlloyAddress) -> Result<Option<AccountInfo>, Self::Error> {
         // Check cached accounts first
         if let Some(account) = self.accounts.get(&address) {
+            info!(
+                address = %address,
+                code_hash = %account.code_hash,
+                "ExecutionDb::basic - returning cached account"
+            );
             return Ok(Some(account.clone()));
         }
 
@@ -92,6 +97,12 @@ impl revm::Database for ExecutionDb {
             } else {
                 B256::from_slice(&account.code_hash)
             };
+            info!(
+                address = %address,
+                code_hash = %code_hash,
+                nonce = account.nonce,
+                "ExecutionDb::basic - loading from StateDB"
+            );
             Ok(Some(AccountInfo {
                 balance: U256::from(account.balance),
                 nonce: account.nonce,
@@ -99,6 +110,10 @@ impl revm::Database for ExecutionDb {
                 code: None,
             }))
         } else {
+            info!(
+                address = %address,
+                "ExecutionDb::basic - account not found"
+            );
             Ok(None)
         }
     }
@@ -106,11 +121,21 @@ impl revm::Database for ExecutionDb {
     fn code_by_hash(&mut self, code_hash: B256) -> Result<revm::primitives::Bytecode, Self::Error> {
         // Check local cache first
         if let Some(code) = self.code.get(&code_hash) {
+            info!(
+                code_hash = %code_hash,
+                code_len = code.len(),
+                "ExecutionDb::code_by_hash - returning cached code"
+            );
             return Ok(code.clone());
         }
 
         // Fall back to state_db
         if let Some(code) = self.state_db.get_code(&code_hash.0) {
+            info!(
+                code_hash = %code_hash,
+                code_len = code.len(),
+                "ExecutionDb::code_by_hash - loading from StateDB"
+            );
             Ok(revm::primitives::Bytecode::new_raw(Bytes::from(code)))
         } else {
             Ok(revm::primitives::Bytecode::new())
@@ -121,6 +146,12 @@ impl revm::Database for ExecutionDb {
         // Check writes cache first
         if let Some(account_storage) = self.storage_writes.get(&address) {
             if let Some(value) = account_storage.get(&index) {
+                info!(
+                    address = %address,
+                    slot = %index,
+                    value = %value,
+                    "ExecutionDb::storage - returning cached write"
+                );
                 return Ok(*value);
             }
         }
@@ -129,7 +160,14 @@ impl revm::Database for ExecutionDb {
         let addr_bytes: [u8; 20] = address.0.into();
         let slot_bytes: [u8; 32] = index.to_be_bytes();
         let value = self.state_db.get_storage(&addr_bytes, &slot_bytes);
-        Ok(U256::from_be_bytes(value))
+        let result = U256::from_be_bytes(value);
+        info!(
+            address = %address,
+            slot = %index,
+            value = %result,
+            "ExecutionDb::storage - reading from StateDB"
+        );
+        Ok(result)
     }
 
     fn block_hash(&mut self, _number: u64) -> Result<B256, Self::Error> {
