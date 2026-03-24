@@ -3,14 +3,12 @@
 //! This module defines all available CLI commands using clap's derive macros.
 //! Each subcommand has its own module with implementation details.
 
-pub mod governance;
 pub mod init;
 pub mod integrity;
 pub mod keys;
 pub mod query;
 pub mod staking;
 pub mod start;
-pub mod upgrade;
 
 use crate::utils::{CliResult, OutputFormat};
 use clap::{Parser, Subcommand};
@@ -60,62 +58,12 @@ pub enum Commands {
     #[command(subcommand)]
     Staking(staking::StakingCommands),
 
-    /// Governance operations
-    #[command(subcommand)]
-    Governance(governance::GovernanceCommands),
-
     /// Binary integrity verification
     #[command(subcommand)]
     Integrity(integrity::IntegrityCommands),
 
-    /// Software upgrade management
-    #[command(subcommand)]
-    Upgrade(upgrade::UpgradeCommands),
-
-    /// Export state snapshot
-    Export(ExportArgs),
-
-    /// Import state snapshot
-    Import(ImportArgs),
-
     /// Show version information
     Version,
-}
-
-/// Arguments for the export command
-#[derive(Parser, Debug)]
-pub struct ExportArgs {
-    /// Output file path for the snapshot
-    #[arg(short, long)]
-    pub output: String,
-
-    /// Block height to export (default: latest)
-    #[arg(long)]
-    pub height: Option<u64>,
-
-    /// Include full transaction data
-    #[arg(long, default_value = "false")]
-    pub include_txs: bool,
-
-    /// Compression format (none, gzip, zstd)
-    #[arg(long, default_value = "zstd")]
-    pub compression: String,
-}
-
-/// Arguments for the import command
-#[derive(Parser, Debug)]
-pub struct ImportArgs {
-    /// Input file path for the snapshot
-    #[arg(short, long)]
-    pub input: String,
-
-    /// Data directory to import into
-    #[arg(long)]
-    pub data_dir: Option<String>,
-
-    /// Skip verification of state root
-    #[arg(long, default_value = "false")]
-    pub skip_verify: bool,
 }
 
 /// Execute the CLI with parsed arguments
@@ -140,107 +88,9 @@ pub async fn run_cli(cli: Cli) -> CliResult<()> {
         Commands::Keys(cmd) => keys::execute(cmd, cli.output).await,
         Commands::Query(cmd) => query::execute(cmd, cli.output).await,
         Commands::Staking(cmd) => staking::execute(cmd, cli.output).await,
-        Commands::Governance(cmd) => governance::execute(cmd, cli.output).await,
         Commands::Integrity(cmd) => integrity::execute(cmd, cli.output).await,
-        Commands::Upgrade(cmd) => upgrade::execute(cmd, cli.output).await,
-        Commands::Export(args) => execute_export(args, cli.output).await,
-        Commands::Import(args) => execute_import(args, cli.output).await,
         Commands::Version => execute_version(cli.output),
     }
-}
-
-/// Execute the export command
-async fn execute_export(args: ExportArgs, output_format: OutputFormat) -> CliResult<()> {
-    use crate::utils::{print_info, print_success};
-    use std::path::Path;
-
-    print_info(&format!("Exporting state snapshot to: {}", args.output));
-
-    let output_path = Path::new(&args.output);
-
-    // Ensure parent directory exists
-    if let Some(parent) = output_path.parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-
-    let height_str = args
-        .height
-        .map(|h| h.to_string())
-        .unwrap_or_else(|| "latest".to_string());
-
-    // TODO: Implement actual export logic with protocore-storage
-    // For now, we demonstrate the structure
-
-    let export_info = serde_json::json!({
-        "status": "success",
-        "output_file": args.output,
-        "height": height_str,
-        "include_txs": args.include_txs,
-        "compression": args.compression,
-        "timestamp": chrono::Utc::now().to_rfc3339(),
-    });
-
-    match output_format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&export_info)?);
-        }
-        OutputFormat::Text => {
-            print_success(&format!(
-                "State snapshot exported successfully\n  File: {}\n  Height: {}\n  Compression: {}",
-                args.output, height_str, args.compression
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-/// Execute the import command
-async fn execute_import(args: ImportArgs, output_format: OutputFormat) -> CliResult<()> {
-    use crate::utils::{print_info, print_success, print_warning, CliError};
-    use std::path::Path;
-
-    let input_path = Path::new(&args.input);
-
-    if !input_path.exists() {
-        return Err(CliError::FileNotFound(args.input.clone()));
-    }
-
-    print_info(&format!("Importing state snapshot from: {}", args.input));
-
-    if args.skip_verify {
-        print_warning("Skipping state root verification - data integrity not guaranteed");
-    }
-
-    let data_dir = args
-        .data_dir
-        .unwrap_or_else(|| crate::default_data_dir().to_string_lossy().to_string());
-
-    // TODO: Implement actual import logic with protocore-storage
-
-    let import_info = serde_json::json!({
-        "status": "success",
-        "input_file": args.input,
-        "data_dir": data_dir,
-        "verified": !args.skip_verify,
-        "timestamp": chrono::Utc::now().to_rfc3339(),
-    });
-
-    match output_format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&import_info)?);
-        }
-        OutputFormat::Text => {
-            print_success(&format!(
-                "State snapshot imported successfully\n  From: {}\n  To: {}\n  Verified: {}",
-                args.input, data_dir, !args.skip_verify
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 /// Execute the version command

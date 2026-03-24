@@ -1265,8 +1265,6 @@ struct ComponentHandles {
     rpc: Option<JoinHandle<()>>,
     /// Mempool service handle
     mempool: Option<JoinHandle<()>>,
-    /// State sync handle (if syncing)
-    state_sync: Option<JoinHandle<()>>,
     /// Block executor handle
     executor: Option<JoinHandle<()>>,
 }
@@ -1812,14 +1810,6 @@ impl Node {
         // Update status
         self.set_status(NodeStatus::Starting);
 
-        // Check if we need to sync
-        let needs_sync = self.check_sync_status().await?;
-
-        if needs_sync {
-            self.set_status(NodeStatus::Syncing);
-            self.start_state_sync().await?;
-        }
-
         // Start all components
         self.start_network().await?;
         self.start_mempool().await?;
@@ -2251,42 +2241,6 @@ impl Node {
         Ok(())
     }
 
-    /// Start state synchronization if needed
-    async fn start_state_sync(&mut self) -> Result<()> {
-        info!("Starting state synchronization");
-
-        // State sync requires implementations of SyncNetwork and StateStorage traits.
-        // In a production implementation, we would:
-        // 1. Create a NetworkAdapter implementing SyncNetwork using our P2P layer
-        // 2. Create a StorageAdapter implementing StateStorage using Database + StateDB
-        // 3. Create StateSyncManager with these adapters
-
-        // For now, use the default config and log that sync would be performed
-        let sync_config = protocore_state_sync::StateSyncConfig::default();
-        info!(
-            "State sync configured with min_peers={}, require_finality={}",
-            sync_config.min_peers, sync_config.require_finality
-        );
-
-        let mut shutdown_rx = self.shutdown_tx.as_ref().unwrap().subscribe();
-
-        let sync_task = tokio::spawn(async move {
-            // State sync placeholder - in production, this would run the actual sync
-            loop {
-                tokio::select! {
-                    _ = shutdown_rx.recv() => {
-                        info!("State sync shutting down");
-                        break;
-                    }
-                }
-            }
-        });
-
-        self.handles.state_sync = Some(sync_task);
-
-        Ok(())
-    }
-
     /// Start the block executor (processes new blocks)
     async fn start_block_executor(&mut self) -> Result<()> {
         info!("Starting block executor");
@@ -2512,13 +2466,6 @@ impl Node {
             match tokio::time::timeout(timeout, handle).await {
                 Ok(_) => debug!("Block executor stopped"),
                 Err(_) => warn!("Block executor shutdown timed out"),
-            }
-        }
-
-        if let Some(handle) = self.handles.state_sync.take() {
-            match tokio::time::timeout(timeout, handle).await {
-                Ok(_) => debug!("State sync stopped"),
-                Err(_) => warn!("State sync shutdown timed out"),
             }
         }
 

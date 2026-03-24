@@ -2,15 +2,12 @@
 resolver = "2"
 members = [
     "crates/protocore",
-    "crates/core",
     "crates/consensus",
     "crates/evm",
     "crates/p2p",
     "crates/storage",
     "crates/mempool",
     "crates/rpc",
-    "crates/light-client",
-    "crates/state-sync",
     # "crates/privacy",  # Deferred to phase2/
     "crates/config",
     "crates/types",
@@ -27,7 +24,6 @@ repository = "https://github.com/prototype-network/proto-core"
 
 [workspace.dependencies]
 # Internal crates
-protocore-core = { path = "crates/core" }
 protocore-types = { path = "crates/types" }
 protocore-crypto = { path = "crates/crypto" }
 protocore-config = { path = "crates/config" }
@@ -37,8 +33,6 @@ protocore-evm = { path = "crates/evm" }
 protocore-p2p = { path = "crates/p2p" }
 protocore-mempool = { path = "crates/mempool" }
 protocore-rpc = { path = "crates/rpc" }
-protocore-light-client = { path = "crates/light-client" }
-protocore-state-sync = { path = "crates/state-sync" }
 # protocore-privacy = { path = "crates/privacy" }  # Deferred to phase2/
 protocore-cli = { path = "crates/cli" }
 

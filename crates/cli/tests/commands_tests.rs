@@ -3,7 +3,7 @@
 use clap::{CommandFactory, Parser};
 use protocore_cli::commands::{
     integrity::AttestationCommands, integrity::IntegrityCommands, keys::KeysCommands,
-    query::QueryCommands, upgrade::UpgradeCommands, Cli, Commands,
+    query::QueryCommands, Cli, Commands,
 };
 use protocore_cli::OutputFormat;
 
@@ -74,64 +74,3 @@ fn test_parse_integrity_attestation_status() {
     ));
 }
 
-#[test]
-fn test_parse_upgrade_status() {
-    let cli = Cli::parse_from(["protocore", "upgrade", "status"]);
-    assert!(matches!(
-        cli.command,
-        Commands::Upgrade(UpgradeCommands::Status(_))
-    ));
-}
-
-#[test]
-fn test_parse_upgrade_vote_yes() {
-    let cli = Cli::parse_from([
-        "protocore",
-        "upgrade",
-        "vote",
-        "42",
-        "--yes",
-        "--from",
-        "0x1234",
-    ]);
-    match cli.command {
-        Commands::Upgrade(UpgradeCommands::Vote(args)) => {
-            assert_eq!(args.proposal_id, 42);
-            assert!(args.yes);
-            assert!(!args.no);
-        }
-        _ => panic!("Expected Upgrade Vote command"),
-    }
-}
-
-#[test]
-fn test_parse_upgrade_vote_no() {
-    let cli = Cli::parse_from([
-        "protocore",
-        "upgrade",
-        "vote",
-        "42",
-        "--no",
-        "--from",
-        "0x1234",
-    ]);
-    match cli.command {
-        Commands::Upgrade(UpgradeCommands::Vote(args)) => {
-            assert_eq!(args.proposal_id, 42);
-            assert!(!args.yes);
-            assert!(args.no);
-        }
-        _ => panic!("Expected Upgrade Vote command"),
-    }
-}
-
-#[test]
-fn test_parse_upgrade_history() {
-    let cli = Cli::parse_from(["protocore", "upgrade", "history", "--limit", "5"]);
-    match cli.command {
-        Commands::Upgrade(UpgradeCommands::History(args)) => {
-            assert_eq!(args.limit, 5);
-        }
-        _ => panic!("Expected Upgrade History command"),
-    }
-}

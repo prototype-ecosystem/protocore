@@ -23,8 +23,6 @@ protocore-evm = { workspace = true }
 protocore-p2p = { workspace = true }
 protocore-mempool = { workspace = true }
 protocore-rpc = { workspace = true }
-protocore-light-client = { workspace = true }
-protocore-state-sync = { workspace = true }
 # protocore-privacy = { workspace = true }  # Deferred to phase2/
 protocore-cli = { workspace = true }
 

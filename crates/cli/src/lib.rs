@@ -3,7 +3,7 @@
 //! Command-line interface for the Proto Core blockchain.
 //!
 //! This crate provides a comprehensive CLI for interacting with Proto Core nodes,
-//! managing keys, querying blockchain state, and performing staking and governance operations.
+//! managing keys, querying blockchain state, and performing staking operations.
 //!
 //! ## Available Commands
 //!
@@ -12,9 +12,7 @@
 //! - `keys` - Key management (generate, list, import, export)
 //! - `query` - Query blockchain state (blocks, transactions, accounts)
 //! - `staking` - Staking operations (stake, unstake, delegate, withdraw)
-//! - `governance` - Governance operations (propose, vote, list proposals)
-//! - `export` - Export state snapshot
-//! - `import` - Import state snapshot
+//! - `integrity` - Binary integrity verification
 //! - `version` - Display version information
 //!
 //! ## Example Usage
