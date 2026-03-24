@@ -34,7 +34,7 @@
 //!     let config = NetworkConfig::default();
 //!     let (event_tx, mut event_rx) = mpsc::channel(1000);
 //!
-//!     let mut service = NetworkService::new(config, event_tx).await?;
+//!     let (mut service, handle) = NetworkService::new(config, event_tx).await?;
 //!
 //!     // Start the network service
 //!     tokio::spawn(async move {
@@ -44,11 +44,11 @@
 //!     // Handle network events
 //!     while let Some(event) = event_rx.recv().await {
 //!         match event {
-//!             NetworkEvent::NewBlock(block) => {
-//!                 println!("Received new block");
+//!             NetworkEvent::NewBlock { source, message } => {
+//!                 println!("Received new block from {:?}", source);
 //!             }
-//!             NetworkEvent::NewTransaction(tx) => {
-//!                 println!("Received new transaction");
+//!             NetworkEvent::NewTransaction { source, message } => {
+//!                 println!("Received new transaction from {:?}", source);
 //!             }
 //!             _ => {}
 //!         }
@@ -63,6 +63,7 @@
 #![deny(unsafe_code)]
 
 pub mod behaviour;
+pub mod block_sync;
 pub mod ddos;
 pub mod discovery;
 pub mod gossip;
@@ -71,6 +72,9 @@ pub mod registry;
 
 // Re-export main types at crate root
 pub use behaviour::{ProtocoreBehaviour, ProtocoreBehaviourEvent};
+pub use block_sync::{
+    BlockSyncCodec, BlockSyncManager, BlockSyncRequest, BlockSyncResponse, SyncBlock, SyncState,
+};
 pub use ddos::{
     DdosConfig, DdosProtection, DdosStats, RejectionReason, SharedDdosProtection, ViolationType,
 };

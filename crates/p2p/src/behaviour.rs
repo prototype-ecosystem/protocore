@@ -4,15 +4,21 @@
 //! - Gossipsub for pub/sub message propagation
 //! - Kademlia for peer discovery
 //! - Identify for peer identification
+//! - Request-Response for block sync
 
+use crate::block_sync::{BlockSyncCodec, BlockSyncRequest, BlockSyncResponse};
 use libp2p::{
     gossipsub::{self, Behaviour as Gossipsub, Event as GossipsubEvent, MessageAuthenticity},
     identify::{self, Behaviour as Identify, Event as IdentifyEvent},
     kad::{self, store::MemoryStore, Behaviour as Kademlia, Event as KademliaEvent},
+    request_response::{self, Event as RequestResponseEvent},
     swarm::NetworkBehaviour,
     PeerId,
 };
 use std::time::Duration;
+
+/// Type alias for block-sync request-response events
+pub type BlockSyncEvent = RequestResponseEvent<BlockSyncRequest, BlockSyncResponse>;
 
 /// Combined network behaviour events
 #[derive(Debug)]
@@ -23,6 +29,8 @@ pub enum ProtocoreBehaviourEvent {
     Kademlia(KademliaEvent),
     /// Identify event
     Identify(IdentifyEvent),
+    /// Block sync request-response event
+    BlockSync(BlockSyncEvent),
 }
 
 impl From<GossipsubEvent> for ProtocoreBehaviourEvent {
@@ -43,6 +51,12 @@ impl From<IdentifyEvent> for ProtocoreBehaviourEvent {
     }
 }
 
+impl From<BlockSyncEvent> for ProtocoreBehaviourEvent {
+    fn from(event: BlockSyncEvent) -> Self {
+        ProtocoreBehaviourEvent::BlockSync(event)
+    }
+}
+
 /// Combined network behaviour for Proto Core
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "ProtocoreBehaviourEvent")]
@@ -53,6 +67,8 @@ pub struct ProtocoreBehaviour {
     pub kademlia: Kademlia<MemoryStore>,
     /// Identify protocol for peer identification
     pub identify: Identify,
+    /// Request-response for block sync
+    pub block_sync: request_response::Behaviour<BlockSyncCodec>,
 }
 
 impl ProtocoreBehaviour {
@@ -128,10 +144,14 @@ impl ProtocoreBehaviour {
 
         let identify = Identify::new(identify_config);
 
+        // Configure block sync request-response protocol
+        let block_sync = crate::block_sync::new_behaviour();
+
         Ok(Self {
             gossipsub,
             kademlia,
             identify,
+            block_sync,
         })
     }
 

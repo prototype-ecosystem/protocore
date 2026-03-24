@@ -8,6 +8,7 @@
 
 use crate::{
     behaviour::{ProtocoreBehaviour, ProtocoreBehaviourEvent},
+    block_sync::{self, BlockSyncRequest, BlockSyncResponse, SyncBlock},
     discovery::{DiscoveryConfig, PeerDiscovery, QueryType},
     gossip::{GossipMessage, TopicSubscription, Topics},
     Error, Result,
@@ -138,7 +139,7 @@ pub enum NetworkMessage {
 }
 
 /// Events emitted by the network service
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum NetworkEvent {
     /// New peer connected
     PeerConnected(PeerId),
@@ -169,6 +170,22 @@ pub enum NetworkEvent {
     DiscoveryComplete,
     /// Network listening on address
     Listening(Multiaddr),
+    /// Incoming block sync request from a peer (the node should serve blocks)
+    BlockSyncRequest {
+        /// The peer that requested blocks
+        peer_id: PeerId,
+        /// The request
+        request: BlockSyncRequest,
+        /// Channel identifier to send the response back through
+        channel: libp2p::request_response::ResponseChannel<BlockSyncResponse>,
+    },
+    /// Received block sync response from a peer
+    BlockSyncResponse {
+        /// The peer that sent blocks
+        peer_id: PeerId,
+        /// The response containing blocks
+        response: BlockSyncResponse,
+    },
     /// Error occurred
     Error(String),
 }
@@ -188,6 +205,13 @@ pub enum Command {
     Unban(PeerId),
     /// Get connected peers
     GetPeers(mpsc::Sender<Vec<PeerInfo>>),
+    /// Request blocks from a specific peer
+    RequestBlocks(PeerId, BlockSyncRequest),
+    /// Send a block sync response to a peer (serves incoming request)
+    SendBlockSyncResponse(
+        libp2p::request_response::ResponseChannel<BlockSyncResponse>,
+        BlockSyncResponse,
+    ),
     /// Shutdown the network
     Shutdown,
 }
@@ -254,6 +278,30 @@ impl NetworkHandle {
         rx.recv()
             .await
             .ok_or_else(|| Error::Channel("Failed to receive peers".to_string()))
+    }
+
+    /// Request blocks from a peer for block sync
+    pub async fn request_blocks(
+        &self,
+        peer_id: PeerId,
+        request: BlockSyncRequest,
+    ) -> Result<()> {
+        self.command_tx
+            .send(Command::RequestBlocks(peer_id, request))
+            .await
+            .map_err(|e| Error::Channel(e.to_string()))
+    }
+
+    /// Send a block sync response back to a requesting peer
+    pub async fn send_block_sync_response(
+        &self,
+        channel: libp2p::request_response::ResponseChannel<BlockSyncResponse>,
+        response: BlockSyncResponse,
+    ) -> Result<()> {
+        self.command_tx
+            .send(Command::SendBlockSyncResponse(channel, response))
+            .await
+            .map_err(|e| Error::Channel(e.to_string()))
     }
 
     /// Shutdown the network service
@@ -579,6 +627,9 @@ impl NetworkService {
             ProtocoreBehaviourEvent::Identify(event) => {
                 self.handle_identify_event(event);
             }
+            ProtocoreBehaviourEvent::BlockSync(event) => {
+                self.handle_block_sync_event(event).await;
+            }
             _ => {}
         }
     }
@@ -728,6 +779,75 @@ impl NetworkService {
         }
     }
 
+    /// Handle block sync request-response events
+    async fn handle_block_sync_event(
+        &mut self,
+        event: crate::behaviour::BlockSyncEvent,
+    ) {
+        use libp2p::request_response::Event as RREvent;
+        use libp2p::request_response::Message as RRMessage;
+
+        match event {
+            RREvent::Message { peer, message } => match message {
+                RRMessage::Request {
+                    request, channel, ..
+                } => {
+                    // Validate the request before forwarding
+                    if let Err(reason) = block_sync::validate_request(&request) {
+                        warn!(%peer, reason, "Invalid block sync request");
+                        // Send NoBlocks for invalid requests
+                        let _ = self
+                            .swarm
+                            .behaviour_mut()
+                            .block_sync
+                            .send_response(channel, BlockSyncResponse::NoBlocks);
+                        return;
+                    }
+
+                    info!(%peer, ?request, "Received block sync request");
+
+                    // Emit event so the node can serve blocks from its database
+                    let event = NetworkEvent::BlockSyncRequest {
+                        peer_id: peer,
+                        request,
+                        channel,
+                    };
+                    if let Err(e) = self.event_tx.send(event).await {
+                        error!(%e, "Failed to send block sync request event");
+                    }
+                }
+                RRMessage::Response { response, .. } => {
+                    info!(%peer, "Received block sync response");
+
+                    let event = NetworkEvent::BlockSyncResponse {
+                        peer_id: peer,
+                        response,
+                    };
+                    if let Err(e) = self.event_tx.send(event).await {
+                        error!(%e, "Failed to send block sync response event");
+                    }
+                }
+            },
+            RREvent::OutboundFailure {
+                peer,
+                error,
+                ..
+            } => {
+                warn!(%peer, %error, "Block sync outbound failure");
+            }
+            RREvent::InboundFailure {
+                peer,
+                error,
+                ..
+            } => {
+                warn!(%peer, %error, "Block sync inbound failure");
+            }
+            RREvent::ResponseSent { peer, .. } => {
+                debug!(%peer, "Block sync response sent");
+            }
+        }
+    }
+
     /// Handle commands
     async fn handle_command(&mut self, command: Command) -> Result<bool> {
         match command {
@@ -753,6 +873,23 @@ impl NetworkService {
             Command::GetPeers(tx) => {
                 let peers: Vec<PeerInfo> = self.peer_info.values().cloned().collect();
                 let _ = tx.send(peers).await;
+            }
+            Command::RequestBlocks(peer_id, request) => {
+                info!(%peer_id, ?request, "Sending block sync request to peer");
+                self.swarm
+                    .behaviour_mut()
+                    .block_sync
+                    .send_request(&peer_id, request);
+            }
+            Command::SendBlockSyncResponse(channel, response) => {
+                if let Err(resp) = self
+                    .swarm
+                    .behaviour_mut()
+                    .block_sync
+                    .send_response(channel, response)
+                {
+                    warn!("Failed to send block sync response");
+                }
             }
             Command::Shutdown => {
                 return Ok(true);

@@ -27,7 +27,10 @@ use protocore_consensus::{BlockBuilder, BlockValidator, ConsensusEngine};
 use protocore_crypto::Hash as CryptoHash;
 use protocore_evm::{BlockContext, EvmConfig, EvmExecutor, MemoryDb, TransactionData};
 use protocore_mempool::{AccountStateProvider, Mempool, MempoolConfig, ValidationConfig};
-use protocore_p2p::{GossipMessage, NetworkConfig, NetworkEvent, NetworkHandle, NetworkService};
+use protocore_p2p::{
+    BlockSyncRequest, BlockSyncResponse, GossipMessage, NetworkConfig, NetworkEvent, NetworkHandle,
+    NetworkService, SyncBlock,
+};
 use protocore_rpc::{
     BlockNumberOrTag, CallRequest, EpochInfo, FeeHistory, FinalityCert, GovernanceProposal,
     HexU256, HexU64, LogFilter, NetworkStats, ProposalStatus, ProtocoreStateProvider, RpcBlock,
@@ -1929,6 +1932,7 @@ impl Node {
         let mempool = Arc::clone(&self.mempool);
         let node_event_tx = self.event_tx.clone();
         let consensus_tx = self.consensus_msg_tx.clone();
+        let net_handle_clone = self.network_handle.as_ref().unwrap().clone();
         let mut shutdown_rx = self.shutdown_tx.as_ref().unwrap().subscribe();
 
         // Spawn network event handler
@@ -1943,6 +1947,7 @@ impl Node {
                             &mempool,
                             &node_event_tx,
                             &consensus_tx,
+                            &net_handle_clone,
                         ).await {
                             warn!(error = %e, "Error handling network event");
                         }
@@ -1974,11 +1979,12 @@ impl Node {
     /// Handle incoming network events
     async fn handle_network_event(
         event: NetworkEvent,
-        _database: &Arc<Database>,
+        database: &Arc<Database>,
         _state_db: &Arc<StateDB>,
         _mempool: &Arc<Mempool<StateDBAdapter>>,
         event_tx: &broadcast::Sender<NodeEvent>,
         consensus_tx: &Option<mpsc::Sender<GossipMessage>>,
+        network_handle: &NetworkHandle,
     ) -> Result<()> {
         match event {
             NetworkEvent::NewBlock { source, message: _ } => {
@@ -2025,11 +2031,105 @@ impl Node {
             NetworkEvent::Listening(addr) => {
                 info!(address = %addr, "Network listening");
             }
+            NetworkEvent::BlockSyncRequest {
+                peer_id,
+                request,
+                channel,
+            } => {
+                // Serve blocks from our database
+                let response = Self::serve_block_sync_request(database, &request);
+                if let Err(e) = network_handle
+                    .send_block_sync_response(channel, response)
+                    .await
+                {
+                    warn!(error = %e, %peer_id, "Failed to send block sync response");
+                }
+            }
+            NetworkEvent::BlockSyncResponse {
+                peer_id,
+                response,
+            } => {
+                match &response {
+                    BlockSyncResponse::Blocks { blocks } => {
+                        info!(
+                            %peer_id,
+                            count = blocks.len(),
+                            "Received synced blocks from peer"
+                        );
+                        // Emit sync progress event for each block batch
+                        if let Some(last) = blocks.last() {
+                            let _ = event_tx.send(NodeEvent::SyncProgress {
+                                current: last.height,
+                                target: 0, // caller must track target
+                            });
+                        }
+                    }
+                    BlockSyncResponse::NoBlocks => {
+                        debug!(%peer_id, "Peer has no blocks for our request");
+                    }
+                }
+            }
             NetworkEvent::Error(err) => {
                 warn!(error = %err, "Network error");
             }
         }
         Ok(())
+    }
+
+    /// Look up blocks from the database to serve a sync request
+    fn serve_block_sync_request(
+        database: &Database,
+        request: &BlockSyncRequest,
+    ) -> BlockSyncResponse {
+        let (start, end) = match request {
+            BlockSyncRequest::GetBlocks {
+                start_height,
+                end_height,
+            } => (*start_height, *end_height),
+        };
+
+        let mut blocks = Vec::new();
+
+        for height in start..=end {
+            // Look up block hash from metadata (key: "block_hash_{height}")
+            let height_key = format!("block_hash_{}", height);
+            match database.get_metadata(height_key.as_bytes()) {
+                Ok(Some(hash_bytes)) => {
+                    // Fetch block data using the hash
+                    match database.get_block(&hash_bytes) {
+                        Ok(Some(block_data)) => {
+                            blocks.push(SyncBlock {
+                                height,
+                                data: block_data,
+                            });
+                        }
+                        Ok(None) => {
+                            warn!(height, "Block hash found but block data missing");
+                            break;
+                        }
+                        Err(e) => {
+                            warn!(height, error = %e, "Failed to read block data");
+                            break;
+                        }
+                    }
+                }
+                Ok(None) => {
+                    // We don't have this block height — stop here
+                    debug!(height, "No block at height, stopping sync response");
+                    break;
+                }
+                Err(e) => {
+                    warn!(height, error = %e, "Failed to look up block hash");
+                    break;
+                }
+            }
+        }
+
+        if blocks.is_empty() {
+            BlockSyncResponse::NoBlocks
+        } else {
+            BlockSyncResponse::Blocks { blocks }
+        }
     }
 
     /// Start the mempool service

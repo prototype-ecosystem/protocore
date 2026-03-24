@@ -2824,6 +2824,7 @@ dependencies = [
  "libp2p-noise 0.45.0",
  "libp2p-quic 0.11.1",
  "libp2p-relay",
+ "libp2p-request-response",
  "libp2p-swarm 0.45.1",
  "libp2p-tcp 0.42.0",
  "libp2p-upnp 0.3.0",
@@ -4585,6 +4586,7 @@ dependencies = [
 name = "protocore-p2p"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "futures",
  "instant",
  "libp2p 0.54.1",
