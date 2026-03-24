@@ -3,6 +3,7 @@
 //! This module provides the main RPC server that combines HTTP and WebSocket
 //! endpoints with all the Ethereum and Proto Core RPC methods.
 
+use crate::ddos::RpcDdosProtection;
 use crate::eth::{
     EthApiImpl, EthApiServer, NetApiImpl, NetApiServer, StateProvider, Web3ApiImpl, Web3ApiServer,
 };
@@ -81,6 +82,12 @@ pub struct RpcServer<S, M> {
     state: Arc<S>,
     mc_state: Arc<M>,
     subscription_manager: Arc<SubscriptionManager>,
+    /// DDoS protection for rate limiting RPC requests.
+    ///
+    /// Available via `ddos_protection()` for use in jsonrpsee middleware or
+    /// a reverse-proxy layer. Call `check_request(ip, method, api_key)` per
+    /// incoming request to enforce per-IP rate limits and cost budgets.
+    ddos_protection: Arc<RpcDdosProtection>,
     http_handle: Option<ServerHandle>,
     ws_handle: Option<ServerHandle>,
 }
@@ -97,9 +104,23 @@ where
             state,
             mc_state,
             subscription_manager: Arc::new(SubscriptionManager::new()),
+            ddos_protection: Arc::new(RpcDdosProtection::with_defaults()),
             http_handle: None,
             ws_handle: None,
         }
+    }
+
+    /// Get a reference to the DDoS protection manager.
+    ///
+    /// Use this to check rate limits per request in middleware or proxy layers:
+    /// ```ignore
+    /// let result = server.ddos_protection().check_request(client_ip, "eth_call", None);
+    /// if !result.allowed {
+    ///     // reject with 429 or JSON-RPC error
+    /// }
+    /// ```
+    pub fn ddos_protection(&self) -> &Arc<RpcDdosProtection> {
+        &self.ddos_protection
     }
 
     /// Get the subscription manager for broadcasting events.

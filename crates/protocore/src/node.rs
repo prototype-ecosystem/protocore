@@ -28,8 +28,8 @@ use protocore_crypto::Hash as CryptoHash;
 use protocore_evm::{BlockContext, EvmConfig, EvmExecutor, MemoryDb, TransactionData};
 use protocore_mempool::{AccountStateProvider, Mempool, MempoolConfig, ValidationConfig};
 use protocore_p2p::{
-    BlockSyncRequest, BlockSyncResponse, GossipMessage, NetworkConfig, NetworkEvent, NetworkHandle,
-    NetworkService, SyncBlock,
+    BlockSyncManager, BlockSyncRequest, BlockSyncResponse, GossipMessage, NetworkConfig,
+    NetworkEvent, NetworkHandle, NetworkService, SyncBlock,
 };
 use protocore_rpc::{
     BlockNumberOrTag, CallRequest, EpochInfo, FeeHistory, FinalityCert, GovernanceProposal,
@@ -1302,6 +1302,9 @@ pub struct Node {
     /// Channel to forward consensus messages to validator (if set)
     consensus_msg_tx: Option<mpsc::Sender<GossipMessage>>,
 
+    /// Block sync manager for catch-up sync
+    sync_manager: Arc<RwLock<BlockSyncManager>>,
+
     /// Event broadcaster for node events
     event_tx: broadcast::Sender<NodeEvent>,
 
@@ -1603,6 +1606,22 @@ impl Node {
         // Create event broadcaster
         let (event_tx, _) = broadcast::channel(1000);
 
+        // Determine current height for the sync manager
+        let current_height = database
+            .get_metadata(b"latest_height")
+            .ok()
+            .flatten()
+            .map(|data| {
+                if data.len() >= 8 {
+                    u64::from_le_bytes(data[..8].try_into().unwrap())
+                } else {
+                    0
+                }
+            })
+            .unwrap_or(0);
+
+        let sync_manager = Arc::new(RwLock::new(BlockSyncManager::new(current_height)));
+
         Ok(Self {
             config,
             status: Arc::new(RwLock::new(NodeStatus::Starting)),
@@ -1612,6 +1631,7 @@ impl Node {
             network_handle: None,
             consensus: None,
             consensus_msg_tx: None,
+            sync_manager,
             event_tx,
             shutdown_tx: None,
             handles: ComponentHandles::default(),
@@ -1923,6 +1943,7 @@ impl Node {
         let node_event_tx = self.event_tx.clone();
         let consensus_tx = self.consensus_msg_tx.clone();
         let net_handle_clone = self.network_handle.as_ref().unwrap().clone();
+        let sync_mgr = Arc::clone(&self.sync_manager);
         let mut shutdown_rx = self.shutdown_tx.as_ref().unwrap().subscribe();
 
         // Spawn network event handler
@@ -1938,6 +1959,7 @@ impl Node {
                             &node_event_tx,
                             &consensus_tx,
                             &net_handle_clone,
+                            &sync_mgr,
                         ).await {
                             warn!(error = %e, "Error handling network event");
                         }
@@ -1970,19 +1992,21 @@ impl Node {
     async fn handle_network_event(
         event: NetworkEvent,
         database: &Arc<Database>,
-        _state_db: &Arc<StateDB>,
+        state_db: &Arc<StateDB>,
         _mempool: &Arc<Mempool<StateDBAdapter>>,
         event_tx: &broadcast::Sender<NodeEvent>,
         consensus_tx: &Option<mpsc::Sender<GossipMessage>>,
         network_handle: &NetworkHandle,
+        sync_manager: &Arc<RwLock<BlockSyncManager>>,
     ) -> Result<()> {
         match event {
-            NetworkEvent::NewBlock { source, message: _ } => {
+            NetworkEvent::NewBlock { source, message } => {
                 debug!(source = %source, "Received new block from network");
-                // The message contains a GossipMessage - in production we would:
-                // 1. Deserialize the block from the message
-                // 2. Validate the block
-                // 3. Add to pending blocks for processing
+                // Extract peer height and check if we need to sync
+                if let Some(peer_height) = message.height() {
+                    Self::maybe_start_sync(sync_manager, network_handle, source, peer_height)
+                        .await;
+                }
             }
             NetworkEvent::NewTransaction { source, message: _ } => {
                 debug!(source = %source, "Received new transaction from network");
@@ -2003,6 +2027,12 @@ impl Node {
                 });
             }
             NetworkEvent::ConsensusMessage { source, message } => {
+                // Extract peer height before forwarding — this lets us detect if we're behind
+                if let Some(peer_height) = message.height() {
+                    Self::maybe_start_sync(sync_manager, network_handle, source, peer_height)
+                        .await;
+                }
+
                 info!(source = %source, msg_type = ?message.message_type(), "Received consensus message from network");
                 // Forward to consensus engine if we're a validator
                 if let Some(tx) = consensus_tx {
@@ -2039,23 +2069,90 @@ impl Node {
                 peer_id,
                 response,
             } => {
-                match &response {
+                match response {
                     BlockSyncResponse::Blocks { blocks } => {
                         info!(
                             %peer_id,
                             count = blocks.len(),
-                            "Received synced blocks from peer"
+                            "Received synced blocks from peer — executing"
                         );
-                        // Emit sync progress event for each block batch
-                        if let Some(last) = blocks.last() {
+
+                        let mut last_applied_height = 0u64;
+
+                        for sync_block in &blocks {
+                            // Verify this is the next expected block
+                            let expected = {
+                                let mgr = sync_manager.read();
+                                mgr.state().local_height + 1
+                            };
+                            if sync_block.height != expected {
+                                warn!(
+                                    expected = expected,
+                                    got = sync_block.height,
+                                    "Sync block height mismatch, skipping rest of batch"
+                                );
+                                break;
+                            }
+
+                            // Decode the block from RLP
+                            let block = match Block::rlp_decode(&sync_block.data) {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    warn!(
+                                        height = sync_block.height,
+                                        error = %e,
+                                        "Failed to decode synced block"
+                                    );
+                                    break;
+                                }
+                            };
+
+                            // Execute and commit the block (reuses the same path as consensus)
+                            match Self::execute_block(database, state_db, &block).await {
+                                Ok(()) => {
+                                    last_applied_height = sync_block.height;
+                                    sync_manager.write().advance(sync_block.height);
+                                    debug!(
+                                        height = sync_block.height,
+                                        "Synced block executed and committed"
+                                    );
+                                }
+                                Err(e) => {
+                                    error!(
+                                        height = sync_block.height,
+                                        error = %e,
+                                        "Failed to execute synced block"
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Emit sync progress
+                        if last_applied_height > 0 {
+                            let target = sync_manager.read().state().target_height;
                             let _ = event_tx.send(NodeEvent::SyncProgress {
-                                current: last.height,
-                                target: 0, // caller must track target
+                                current: last_applied_height,
+                                target,
                             });
+                        }
+
+                        // If still syncing, request the next batch
+                        let next_req = sync_manager.read().next_request();
+                        if let Some(request) = next_req {
+                            if let Err(e) =
+                                network_handle.request_blocks(peer_id, request).await
+                            {
+                                warn!(error = %e, "Failed to request next sync batch");
+                            }
+                        } else {
+                            info!("Block sync complete — node is caught up");
                         }
                     }
                     BlockSyncResponse::NoBlocks => {
                         debug!(%peer_id, "Peer has no blocks for our request");
+                        // Peer doesn't have what we need — stop syncing from them
+                        sync_manager.write().stop_sync();
                     }
                 }
             }
@@ -2122,6 +2219,57 @@ impl Node {
             BlockSyncResponse::NoBlocks
         } else {
             BlockSyncResponse::Blocks { blocks }
+        }
+    }
+
+    /// Check if we're behind a peer and initiate block sync if so.
+    ///
+    /// Called when we receive a gossip message (consensus or block announcement) that
+    /// includes a height. If the peer height is more than 1 block ahead, we enter sync
+    /// mode and request the first batch of blocks from that peer.
+    async fn maybe_start_sync(
+        sync_manager: &Arc<RwLock<BlockSyncManager>>,
+        network_handle: &NetworkHandle,
+        peer_id: PeerId,
+        peer_height: u64,
+    ) {
+        let (should_start, request) = {
+            let mut mgr = sync_manager.write();
+            let local = mgr.state().local_height;
+
+            // Only consider sync if peer is more than 1 block ahead
+            if !BlockSyncManager::needs_sync(local, peer_height) || peer_height <= local + 1 {
+                // Update target in case the peer is ahead (for future reference) but
+                // don't start syncing for just 1 block — normal consensus will handle it.
+                mgr.set_target(peer_height);
+                return;
+            }
+
+            // If already syncing, just update the target (may extend the range)
+            if mgr.is_syncing() {
+                mgr.set_target(peer_height);
+                return;
+            }
+
+            info!(
+                local_height = local,
+                peer_height = peer_height,
+                peer = %peer_id,
+                "Node is behind peer — starting block sync"
+            );
+
+            mgr.start_sync(peer_height);
+            let req = mgr.next_request();
+            (true, req)
+        };
+
+        if should_start {
+            if let Some(request) = request {
+                if let Err(e) = network_handle.request_blocks(peer_id, request).await {
+                    warn!(error = %e, "Failed to send initial sync request");
+                    sync_manager.write().stop_sync();
+                }
+            }
         }
     }
 
@@ -2389,26 +2537,24 @@ impl Node {
         data
     }
 
-    /// Check if the node needs to sync
+    /// Check if the node needs to sync.
+    ///
+    /// Returns `true` when the local height is behind the last known peer height
+    /// tracked by the [`BlockSyncManager`].
     async fn check_sync_status(&self) -> Result<bool> {
-        // Get the latest height from database metadata
-        let current_height = self
-            .database
-            .get_metadata(b"latest_height")?
-            .map(|data| {
-                if data.len() >= 8 {
-                    u64::from_le_bytes(data[..8].try_into().unwrap())
-                } else {
-                    0
-                }
-            })
-            .unwrap_or(0);
+        let mgr = self.sync_manager.read();
+        let local = mgr.state().local_height;
+        let target = mgr.state().target_height;
+        let syncing = mgr.is_syncing();
 
-        // In a real implementation, we would query peers for the latest height
-        // For now, we'll just return false (assume we're synced)
-        debug!(current_height = current_height, "Checking sync status");
+        debug!(
+            local_height = local,
+            target_height = target,
+            syncing = syncing,
+            "Checking sync status"
+        );
 
-        Ok(false)
+        Ok(BlockSyncManager::needs_sync(local, target))
     }
 
     /// Wait for shutdown signal

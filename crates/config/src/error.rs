@@ -137,10 +137,6 @@ pub enum ConfigError {
     #[error("Failed to generate genesis block: {0}")]
     GenesisBlockGeneration(String),
 
-    /// Invalid reward weights - must sum to 1.0
-    #[error("Invalid reward weights: must sum to 1.0, got {0}")]
-    InvalidRewardWeights(f64),
-
     /// Invalid approval threshold - must be between 0 and 1
     #[error("Invalid approval threshold: must be between 0.0 and 1.0, got {0}")]
     InvalidApprovalThreshold(f64),

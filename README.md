@@ -22,7 +22,6 @@ Proto Core is the reference implementation of a blockchain node for **Prototype 
 - **Precompiles** for staking, slashing, and governance
 
 ### Economics
-- **Inverse rewards** - smaller validators earn proportionally more, promoting decentralization
 - **State rent** - storage cost management for sustainable state growth
 - **On-chain governance** - parameter changes and upgrades via proposals
 

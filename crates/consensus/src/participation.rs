@@ -1,7 +1,7 @@
-//! # Participation Tracker for Inverse Rewards System
+//! # Participation Tracker
 //!
 //! This module implements the participation tracking component of Proto Core's
-//! inverse rewards system. It tracks validator activity across epochs and calculates
+//! consensus layer. It tracks validator activity across epochs and calculates
 //! participation scores used in reward distribution.
 //!
 //! ## Participation Formula
@@ -67,7 +67,7 @@ pub const VOTE_WEIGHT: f64 = 0.4;
 /// Weight for uptime in participation score (20%)
 pub const UPTIME_WEIGHT: f64 = 0.2;
 
-/// Tracks validator participation across epochs for the inverse rewards system.
+/// Tracks validator participation across epochs.
 ///
 /// The tracker maintains per-validator metrics for the current epoch and historical
 /// participation scores for previous epochs. This data is used to calculate the

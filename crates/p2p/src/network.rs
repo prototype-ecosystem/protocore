@@ -9,6 +9,7 @@
 use crate::{
     behaviour::{ProtocoreBehaviour, ProtocoreBehaviourEvent},
     block_sync::{self, BlockSyncRequest, BlockSyncResponse, SyncBlock},
+    ddos::{DdosProtection, ViolationType},
     discovery::{DiscoveryConfig, PeerDiscovery, QueryType},
     gossip::{GossipMessage, TopicSubscription, Topics},
     Error, Result,
@@ -325,6 +326,8 @@ pub struct NetworkService {
     subscriptions: TopicSubscription,
     /// Peer discovery manager
     discovery: PeerDiscovery,
+    /// DDoS protection (rate limiting + peer scoring)
+    ddos: DdosProtection,
     /// Event sender for external consumers
     event_tx: mpsc::Sender<NetworkEvent>,
     /// Command receiver
@@ -425,6 +428,9 @@ impl NetworkService {
         // Create discovery manager
         let discovery = PeerDiscovery::new(local_peer_id, config.discovery.clone());
 
+        // Create DDoS protection with defaults
+        let ddos = DdosProtection::with_defaults();
+
         // Create command channel
         let (command_tx, command_rx) = mpsc::channel(1000);
         let handle = NetworkHandle::new(command_tx);
@@ -435,6 +441,7 @@ impl NetworkService {
             config,
             subscriptions: TopicSubscription::new(),
             discovery,
+            ddos,
             event_tx,
             command_rx,
             peer_info: HashMap::new(),
@@ -529,6 +536,7 @@ impl NetworkService {
                 // Periodic cleanup
                 _ = cleanup_interval.tick() => {
                     self.discovery.cleanup_expired_bans();
+                    self.ddos.cleanup();
                 }
             }
         }
@@ -642,6 +650,20 @@ impl NetworkService {
         message: gossipsub::Message,
     ) {
         P2P_MESSAGES_RECEIVED_TOTAL.inc();
+
+        // DDoS protection: check rate limit before processing
+        if let Err(reason) = self.ddos.check_message(&source, message.data.len()) {
+            warn!(%source, %reason, "Dropping gossip message: rate limited");
+            // Penalize the peer in discovery scoring
+            self.discovery.penalize_peer(&source, 10);
+            let _ = self.swarm.behaviour_mut().report_message_validation_result(
+                &message_id,
+                &source,
+                MessageAcceptance::Ignore,
+            );
+            return;
+        }
+
         info!(%source, topic = %message.topic, data_len = message.data.len(), "Received gossip message");
 
         // Decode the message
@@ -649,7 +671,9 @@ impl NetworkService {
             Ok(msg) => msg,
             Err(e) => {
                 warn!(%source, %e, "Failed to decode gossip message");
-                // Report invalid message
+                // Report invalid message to DDoS protection and discovery scoring
+                self.ddos.report_violation(&source, ViolationType::InvalidMessage);
+                self.discovery.penalize_peer(&source, 20);
                 let _ = self.swarm.behaviour_mut().report_message_validation_result(
                     &message_id,
                     &source,
@@ -666,7 +690,8 @@ impl NetworkService {
             MessageAcceptance::Accept,
         );
 
-        // Reward peer for valid message
+        // Reward peer for valid message (both DDoS reputation and discovery score)
+        self.ddos.reward_peer(&source, 1);
         self.discovery.reward_peer(&source, 1);
 
         // Dispatch based on message type
@@ -795,6 +820,9 @@ impl NetworkService {
                     // Validate the request before forwarding
                     if let Err(reason) = block_sync::validate_request(&request) {
                         warn!(%peer, reason, "Invalid block sync request");
+                        // Penalize peer for protocol violation
+                        self.ddos.report_violation(&peer, ViolationType::ProtocolViolation);
+                        self.discovery.penalize_peer(&peer, 50);
                         // Send NoBlocks for invalid requests
                         let _ = self
                             .swarm

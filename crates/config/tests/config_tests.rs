@@ -1,10 +1,9 @@
 //! Tests for Config module
 
-use alloy_primitives::U256;
 use protocore_config::{
     AttestationConfig, BanType, ChainConfig, Config, ConfigError, ConsensusConfig, EconomicsConfig,
-    FailureAction, IntegrityConfig, IntegritySlashingConfig, InverseRewardsConfig, RewardWeights,
-    RpcConfig, StorageConfig, SybilPenalties, SybilResistanceConfig, SybilSignalWeights,
+    FailureAction, IntegrityConfig, IntegritySlashingConfig,
+    RpcConfig, StorageConfig,
     UpgradeConfig,
 };
 
@@ -81,111 +80,6 @@ fn test_storage_archive_mode() {
 
     config.state_pruning = 1000;
     assert!(!config.is_archive_mode());
-}
-
-#[test]
-fn test_inverse_rewards_default() {
-    let config = InverseRewardsConfig::default();
-    assert!(config.enabled);
-    assert_eq!(
-        config.validator_bond,
-        U256::from_str_radix("10000000000000000000000", 10).unwrap()
-    );
-    assert_eq!(
-        config.minimum_stake,
-        U256::from_str_radix("1000000000000000000000", 10).unwrap()
-    );
-    assert!(config.validate().is_ok());
-}
-
-#[test]
-fn test_reward_weights_default() {
-    let weights = RewardWeights::default();
-    assert_eq!(weights.base, 0.10);
-    assert_eq!(weights.stake, 0.30);
-    assert_eq!(weights.participation, 0.40);
-    assert_eq!(weights.loyalty, 0.20);
-    assert!(weights.validate().is_ok());
-}
-
-#[test]
-fn test_reward_weights_validation_pass() {
-    let weights = RewardWeights {
-        base: 0.25,
-        stake: 0.25,
-        participation: 0.25,
-        loyalty: 0.25,
-    };
-    assert!(weights.validate().is_ok());
-}
-
-#[test]
-fn test_reward_weights_validation_fail() {
-    let weights = RewardWeights {
-        base: 0.30,
-        stake: 0.30,
-        participation: 0.30,
-        loyalty: 0.30,
-    };
-    assert!(matches!(
-        weights.validate(),
-        Err(ConfigError::InvalidRewardWeights(_))
-    ));
-}
-
-#[test]
-fn test_sybil_resistance_default() {
-    let config = SybilResistanceConfig::default();
-    assert_eq!(config.max_validators, 100);
-    assert_eq!(config.loyalty_maturity_months, 24);
-    assert_eq!(config.re_registration_cooldown_days, 90);
-    assert_eq!(config.appeal_grace_period_days, 7);
-    assert_eq!(config.sybil_ban_duration_days, 365);
-}
-
-#[test]
-fn test_sybil_penalties_default() {
-    let penalties = SybilPenalties::default();
-    assert_eq!(penalties.penalty_cap_medium, 0.80);
-    assert_eq!(penalties.penalty_cap_high, 0.95);
-    assert_eq!(penalties.penalty_cap_confirmed, 0.99);
-}
-
-#[test]
-fn test_sybil_signal_weights_default() {
-    let signals = SybilSignalWeights::default();
-    assert_eq!(signals.weight_controversial_vote_correlation, 2.0);
-    assert_eq!(signals.weight_same_withdrawal_address, 3.0);
-    assert_eq!(signals.weight_same_ip_subnet, 1.0);
-    assert_eq!(signals.weight_vote_timing_correlation, 1.5);
-    assert_eq!(signals.weight_same_registration_epoch, 0.5);
-    assert_eq!(signals.weight_identical_stake_amount, 0.3);
-    assert_eq!(signals.controversial_vote_threshold, 0.80);
-    assert_eq!(signals.vote_timing_threshold_ms, 50);
-}
-
-#[test]
-fn test_config_with_inverse_rewards() {
-    let mut config = Config::default();
-    config.inverse_rewards = Some(InverseRewardsConfig::default());
-    assert!(config.validate().is_ok());
-}
-
-#[test]
-fn test_config_with_invalid_inverse_rewards() {
-    let mut config = Config::default();
-    let mut inverse_rewards = InverseRewardsConfig::default();
-    inverse_rewards.weights = RewardWeights {
-        base: 0.50,
-        stake: 0.50,
-        participation: 0.50,
-        loyalty: 0.50,
-    };
-    config.inverse_rewards = Some(inverse_rewards);
-    assert!(matches!(
-        config.validate(),
-        Err(ConfigError::InvalidRewardWeights(_))
-    ));
 }
 
 // =========================================================================

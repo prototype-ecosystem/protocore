@@ -107,7 +107,6 @@ pub mod epoch;
 pub mod evidence;
 pub mod fork_choice;
 // pub mod integrity;  // Deferred to phase2/
-// pub mod inverse_rewards;  // Deferred to phase2/
 pub mod light_client;
 pub mod participation;
 pub mod proposer;
@@ -136,7 +135,6 @@ pub use types::{
 };
 pub use vote_set::{HeightVoteSet, VoteSet, VoteSetError};
 // Deferred to phase2/:
-// pub use inverse_rewards::{...};
 // pub use integrity::{...};
 pub use ddos::{
     ConsensusDdosConfig, ConsensusDdosProtection, ConsensusDdosStats, ConsensusMessageType,

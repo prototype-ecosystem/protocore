@@ -1,6 +1,6 @@
 //! # Zero False-Positive Sybil Detection
 //!
-//! This module implements multi-signal Sybil detection for the inverse rewards system.
+//! This module implements multi-signal Sybil detection for the consensus layer.
 //! The design prioritizes zero false positives over aggressive detection, using:
 //!
 //! - **Multi-signal confirmation**: No penalty on single weak signals

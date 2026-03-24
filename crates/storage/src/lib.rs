@@ -14,7 +14,6 @@
 
 pub mod db;
 // pub mod hibernation;  // Deferred to phase2/ (depends on rent)
-pub mod loyalty;
 pub mod pruning;
 // pub mod rent;  // Deferred to phase2/
 pub mod snapshot;
@@ -27,9 +26,6 @@ pub use db::{Database, DatabaseConfig, WriteBatch};
 // Hibernation and Rent deferred to phase2/
 // pub use hibernation::{...};
 // pub use rent::{...};
-pub use loyalty::{
-    LoyaltyError, LoyaltySnapshot, LoyaltyStatus, LoyaltyTracker, ValidatorRegistration,
-};
 pub use pruning::{
     Checkpoint, PruningConfig, PruningManager, PruningStats, DEFAULT_BLOCKS_RETAINED,
     DEFAULT_CHECKPOINT_INTERVAL, MIN_BLOCKS_RETAINED,
