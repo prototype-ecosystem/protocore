@@ -38,6 +38,8 @@ use protocore_storage::{Database, DatabaseConfig, StateDB};
 use protocore_types::{Address, Block, BlockHeader, H256};
 use revm::primitives::AccountInfo;
 
+use crate::metrics;
+
 /// Adapter to provide account state from StateDB to the Mempool
 /// This implements the AccountStateProvider trait required by Mempool
 pub struct StateDBAdapter {
@@ -77,12 +79,14 @@ pub struct HybridDb {
     memory_db: MemoryDb,
     /// State database for storage access
     state_db: Arc<StateDB>,
+    /// Block database for block hash lookups (BLOCKHASH opcode)
+    database: Arc<Database>,
 }
 
 impl HybridDb {
     /// Create a new hybrid database
-    pub fn new(memory_db: MemoryDb, state_db: Arc<StateDB>) -> Self {
-        Self { memory_db, state_db }
+    pub fn new(memory_db: MemoryDb, state_db: Arc<StateDB>, database: Arc<Database>) -> Self {
+        Self { memory_db, state_db, database }
     }
 
     /// Insert an account (delegates to memory_db)
@@ -180,8 +184,14 @@ impl revm::Database for HybridDb {
         Ok(U256::from_be_bytes(value))
     }
 
-    fn block_hash(&mut self, _number: u64) -> Result<B256, Self::Error> {
-        // Not typically needed for eth_call
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        // Look up the block hash from metadata storage (written as block_hash_{height})
+        let height_key = format!("block_hash_{}", number);
+        if let Ok(Some(hash_bytes)) = self.database.get_metadata(height_key.as_bytes()) {
+            if hash_bytes.len() >= 32 {
+                return Ok(B256::from_slice(&hash_bytes[..32]));
+            }
+        }
         Ok(B256::ZERO)
     }
 }
@@ -682,7 +692,7 @@ impl StateProvider for RpcStateAdapter {
         // Create HybridDb that uses MemoryDb for accounts but StateDB for storage
         // This allows eth_call to read actual contract storage while still giving
         // the sender unlimited balance for read-only calls.
-        let hybrid_db = HybridDb::new(memory_db, self.state_db.clone());
+        let hybrid_db = HybridDb::new(memory_db, self.state_db.clone(), self.database.clone());
 
         // Create EVM config
         let evm_config = EvmConfig {
@@ -2206,6 +2216,10 @@ impl Node {
                                     .map(|tx| tx.hash())
                                     .collect();
                                 mempool.remove_transactions(&tx_hashes);
+
+                                // Update metrics
+                                metrics::BLOCKS_COMMITTED_TOTAL.inc();
+                                metrics::CONSENSUS_HEIGHT.set(height as i64);
 
                                 // Emit event
                                 let _ = event_tx.send(NodeEvent::BlockCommitted { height, hash });

@@ -63,6 +63,7 @@
 #![deny(unsafe_code)]
 
 pub mod block_builder;
+pub mod metrics;
 pub mod node;
 pub mod validator;
 

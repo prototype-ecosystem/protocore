@@ -367,8 +367,8 @@ impl ConsensusConfig {
 impl Default for ConsensusConfig {
     fn default() -> Self {
         Self {
-            block_time_ms: 2000,
-            blocks_per_epoch: 43200, // ~24 hours at 2s blocks
+            block_time_ms: 6000,
+            blocks_per_epoch: 43200, // ~72 hours at 6s blocks
             max_validators: 51,
             propose_timeout_base: 1000,
             propose_timeout_delta: 500,

@@ -30,6 +30,8 @@ use protocore_types::{Address, Block};
 use revm::primitives::{AccountInfo, HashMap as RevmHashMap};
 use std::collections::HashMap;
 
+use crate::metrics;
+
 /// Database wrapper for EVM execution that reads from StateDB and tracks writes
 struct ExecutionDb {
     state_db: Arc<StateDB>,
@@ -985,6 +987,11 @@ impl ValidatorNode {
                         txs = tx_count,
                         "Block persisted to database"
                     );
+
+                    // Update metrics
+                    metrics::BLOCKS_COMMITTED_TOTAL.inc();
+                    metrics::CONSENSUS_HEIGHT.set(height as i64);
+                    metrics::EVM_TRANSACTIONS_TOTAL.inc_by(tx_count as u64);
 
                     // Broadcast committed block event
                     let _ = committed_tx.send(committed.clone());

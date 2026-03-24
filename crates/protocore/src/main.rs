@@ -13,6 +13,7 @@ use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod block_builder;
+mod metrics;
 mod node;
 mod validator;
 
@@ -606,6 +607,18 @@ async fn handle_start(
     }
     if let Some(peers) = bootstrap_peers {
         config.network.boot_nodes = peers.split(',').map(String::from).collect();
+    }
+
+    // Start Prometheus metrics server if enabled
+    if config.metrics.enabled {
+        metrics::register_all();
+        let metrics_addr: std::net::SocketAddr = config
+            .metrics
+            .address
+            .parse()
+            .unwrap_or_else(|_| "0.0.0.0:9090".parse().unwrap());
+        info!(addr = %metrics_addr, "Starting metrics server");
+        metrics::MetricsServer::new(metrics_addr).spawn();
     }
 
     if validator_mode {

@@ -121,6 +121,8 @@ pub struct ConsensusState {
 
     /// Block we've locked on (won't vote for different block unless POL)
     pub locked_value: Option<Block>,
+    /// Hash of the locked block (kept even when locked_value is None after crash recovery)
+    pub locked_hash: Option<Hash>,
     /// Round in which we locked (-1 if not locked)
     pub locked_round: i64,
 
@@ -138,6 +140,7 @@ impl ConsensusState {
             round: 0,
             step: Step::NewHeight,
             locked_value: None,
+            locked_hash: None,
             locked_round: -1,
             valid_value: None,
             valid_round: -1,
@@ -150,6 +153,7 @@ impl ConsensusState {
         self.round = 0;
         self.step = Step::NewHeight;
         self.locked_value = None;
+        self.locked_hash = None;
         self.locked_round = -1;
         self.valid_value = None;
         self.valid_round = -1;
@@ -275,14 +279,14 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         if recovered.last_height > 0 {
             state.height = recovered.last_height;
             // Restore locked state if any
-            if let (Some(_locked_hash), Some(locked_round)) =
+            if let (Some(locked_hash), Some(locked_round)) =
                 (recovered.locked_value, recovered.locked_round)
             {
                 state.locked_round = locked_round as i64;
-                // Note: We don't restore locked_value (Block) here because we only
-                // stored the hash. The actual block will need to be re-fetched from
-                // storage if needed. For safety, we keep the locked_round to prevent
-                // voting against the locked value.
+                // Store the locked hash so we can reject proposals that don't match
+                // even without the full block. The locked_value (Block) cannot be
+                // restored from the WAL since only the hash was persisted.
+                state.locked_hash = Some(locked_hash);
             }
             info!(
                 height = recovered.last_height,
@@ -621,9 +625,9 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
     async fn process_proposal(&self, proposal: &Proposal) {
         let block_hash_arr: [u8; 32] = proposal.block.hash().into();
 
-        let (locked_round, locked_value) = {
+        let (locked_round, locked_value, locked_hash) = {
             let state = self.state.read();
-            (state.locked_round, state.locked_value.clone())
+            (state.locked_round, state.locked_value.clone(), state.locked_hash)
         };
 
         // Decide whether to prevote for block or nil (Tendermint locking rules)
@@ -635,7 +639,14 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
             .map(|b| b.hash().as_bytes() == &block_hash_arr)
             .unwrap_or(false)
         {
-            // Proposal matches our locked value
+            // Proposal matches our locked value (full block available)
+            true
+        } else if locked_hash
+            .as_ref()
+            .map(|h| *h == block_hash_arr)
+            .unwrap_or(false)
+        {
+            // Proposal matches our locked hash (crash recovery — block not available but hash matches)
             true
         } else if proposal.valid_round >= locked_round {
             // Proposal has POL from a round >= our locked round
@@ -894,6 +905,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
 
                     let mut state = self.state.write();
                     state.locked_value = Some(p.block.clone());
+                    state.locked_hash = Some(block_hash);
                     state.locked_round = round as i64;
                     state.valid_value = Some(p.block.clone());
                     state.valid_round = round as i64;

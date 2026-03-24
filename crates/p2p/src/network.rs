@@ -25,7 +25,24 @@ use std::{
     time::Duration,
 };
 use tokio::sync::mpsc;
+use once_cell::sync::Lazy;
+use prometheus::{IntCounter, IntGauge};
 use tracing::{debug, error, info, warn};
+
+/// Connected peers gauge — updated on connect/disconnect.
+static P2P_PEERS_CONNECTED: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("p2p_peers_connected", "Connected peers").unwrap();
+    // Attempt to register; ignore AlreadyReg (shared registry with protocore metrics).
+    let _ = prometheus::default_registry().register(Box::new(g.clone()));
+    g
+});
+
+/// Gossip messages received counter.
+static P2P_MESSAGES_RECEIVED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("p2p_messages_received_total", "Gossip messages received").unwrap();
+    let _ = prometheus::default_registry().register(Box::new(c.clone()));
+    c
+});
 
 /// Network configuration
 #[derive(Debug, Clone)]
@@ -492,6 +509,7 @@ impl NetworkService {
                     subscribed_topics: Vec::new(),
                     connected: true,
                 });
+                P2P_PEERS_CONNECTED.inc();
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::PeerConnected(peer_id))
@@ -503,6 +521,7 @@ impl NetworkService {
                 if let Some(info) = self.peer_info.get_mut(&peer_id) {
                     info.connected = false;
                 }
+                P2P_PEERS_CONNECTED.dec();
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::PeerDisconnected(peer_id))
@@ -571,6 +590,7 @@ impl NetworkService {
         message_id: gossipsub::MessageId,
         message: gossipsub::Message,
     ) {
+        P2P_MESSAGES_RECEIVED_TOTAL.inc();
         info!(%source, topic = %message.topic, data_len = message.data.len(), "Received gossip message");
 
         // Decode the message

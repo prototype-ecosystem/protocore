@@ -47,6 +47,9 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 
+# Metrics
+prometheus = { workspace = true }
+
 # Utilities
 hex = { workspace = true }
 parking_lot = { workspace = true }

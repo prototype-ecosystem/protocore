@@ -266,7 +266,7 @@ impl WalEntry {
         };
         Self {
             entry_type: WalEntryType::HeightStart,
-            payload: bincode_serialize(&payload),
+            payload: wal_serialize(&payload),
         }
     }
 
@@ -281,7 +281,7 @@ impl WalEntry {
         };
         Self {
             entry_type: WalEntryType::VoteSigned,
-            payload: bincode_serialize(&payload),
+            payload: wal_serialize(&payload),
         }
     }
 
@@ -296,7 +296,7 @@ impl WalEntry {
         };
         Self {
             entry_type: WalEntryType::ProposalSigned,
-            payload: bincode_serialize(&payload),
+            payload: wal_serialize(&payload),
         }
     }
 
@@ -310,7 +310,7 @@ impl WalEntry {
         };
         Self {
             entry_type: WalEntryType::Locked,
-            payload: bincode_serialize(&payload),
+            payload: wal_serialize(&payload),
         }
     }
 
@@ -323,7 +323,7 @@ impl WalEntry {
         };
         Self {
             entry_type: WalEntryType::Committed,
-            payload: bincode_serialize(&payload),
+            payload: wal_serialize(&payload),
         }
     }
 
@@ -420,27 +420,27 @@ impl WalEntry {
 
     /// Parse as HeightStart payload
     pub fn as_height_start(&self) -> WalResult<HeightStartPayload> {
-        bincode_deserialize(&self.payload)
+        wal_deserialize(&self.payload)
     }
 
     /// Parse as VoteSigned payload
     pub fn as_vote_signed(&self) -> WalResult<VoteSignedPayload> {
-        bincode_deserialize(&self.payload)
+        wal_deserialize(&self.payload)
     }
 
     /// Parse as ProposalSigned payload
     pub fn as_proposal_signed(&self) -> WalResult<ProposalSignedPayload> {
-        bincode_deserialize(&self.payload)
+        wal_deserialize(&self.payload)
     }
 
     /// Parse as Locked payload
     pub fn as_locked(&self) -> WalResult<LockedPayload> {
-        bincode_deserialize(&self.payload)
+        wal_deserialize(&self.payload)
     }
 
     /// Parse as Committed payload
     pub fn as_committed(&self) -> WalResult<CommittedPayload> {
-        bincode_deserialize(&self.payload)
+        wal_deserialize(&self.payload)
     }
 }
 
@@ -1090,9 +1090,8 @@ const fn generate_crc32_table() -> [u32; 256] {
     table
 }
 
-/// Simple bincode-like serialization
-fn bincode_serialize<T: Serialize>(value: &T) -> Vec<u8> {
-    // Use a simple length-prefixed format compatible with serde
+/// Serialize a value to length-prefixed JSON for WAL storage
+fn wal_serialize<T: Serialize>(value: &T) -> Vec<u8> {
     let json = serde_json::to_vec(value).unwrap_or_default();
     let mut result = Vec::with_capacity(4 + json.len());
     result.extend_from_slice(&(json.len() as u32).to_le_bytes());
@@ -1100,8 +1099,8 @@ fn bincode_serialize<T: Serialize>(value: &T) -> Vec<u8> {
     result
 }
 
-/// Simple bincode-like deserialization
-fn bincode_deserialize<T: for<'de> Deserialize<'de>>(data: &[u8]) -> WalResult<T> {
+/// Deserialize a value from length-prefixed JSON WAL storage
+fn wal_deserialize<T: for<'de> Deserialize<'de>>(data: &[u8]) -> WalResult<T> {
     if data.len() < 4 {
         return Err(WalError::Serialization("data too short".to_string()));
     }
