@@ -1,0 +1,45 @@
+[Unit]
+Description=Proto Core Blockchain Node
+Documentation=https://github.com/prototype-ecosystem/protocore
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=protocore
+Group=protocore
+ExecStart=/usr/local/bin/protocore start --config /etc/protocore/config.toml --validator --validator-key /etc/protocore/validator.key
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/protocore /var/log/protocore
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=protocore
+
+# Environment
+Environment=RUST_LOG=info
+Environment=RUST_BACKTRACE=1
+
+[Install]
+WantedBy=multi-user.target
