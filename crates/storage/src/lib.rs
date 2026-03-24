@@ -109,6 +109,12 @@ pub enum StorageError {
     Io(#[from] std::io::Error),
 }
 
+impl From<rlp::DecoderError> for StorageError {
+    fn from(e: rlp::DecoderError) -> Self {
+        StorageError::Serialization(e.to_string())
+    }
+}
+
 /// Result type for storage operations
 pub type Result<T> = std::result::Result<T, StorageError>;
 

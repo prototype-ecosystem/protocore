@@ -28,7 +28,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use protocore_crypto::{
-    bls::{BlsPrivateKey, BlsSignature, DomainTag, MessageType},
+    bls::{BlsPrivateKey, BlsSignature, DomainTag},
     Hash,
 };
 use protocore_types::{Address, Block};
@@ -216,6 +216,13 @@ pub struct ConsensusEngine<V: BlockValidator, B: BlockBuilder> {
 
     /// Write-Ahead Log for consensus state persistence (optional)
     wal: Option<Arc<ConsensusWal>>,
+
+    /// Pre-computed BLS domain tag for proposals
+    proposal_domain: DomainTag,
+    /// Pre-computed BLS domain tag for prevotes
+    prevote_domain: DomainTag,
+    /// Pre-computed BLS domain tag for precommits
+    precommit_domain: DomainTag,
 }
 
 impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
@@ -234,6 +241,9 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
     ) -> Self {
         let state = ConsensusState::new();
         let height_votes = HeightVoteSet::new(state.height);
+        let proposal_domain = chain_context.proposal_domain_tag();
+        let prevote_domain = chain_context.domain_tag_for_vote(VoteType::Prevote);
+        let precommit_domain = chain_context.domain_tag_for_vote(VoteType::Precommit);
 
         Self {
             validator_id,
@@ -251,6 +261,9 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
             network_tx,
             commit_tx,
             wal: None,
+            proposal_domain,
+            prevote_domain,
+            precommit_domain,
         }
     }
 
@@ -296,6 +309,9 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         }
 
         let height_votes = HeightVoteSet::new(state.height);
+        let proposal_domain = chain_context.proposal_domain_tag();
+        let prevote_domain = chain_context.domain_tag_for_vote(VoteType::Prevote);
+        let precommit_domain = chain_context.domain_tag_for_vote(VoteType::Precommit);
 
         Ok(Self {
             validator_id,
@@ -313,6 +329,9 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
             network_tx,
             commit_tx,
             wal: Some(Arc::new(wal)),
+            proposal_domain,
+            prevote_domain,
+            precommit_domain,
         })
     }
 
@@ -329,16 +348,6 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
     /// Get the chain context
     pub fn chain_context(&self) -> &ChainContext {
         &self.chain_context
-    }
-
-    /// Build the chain_id string used for BLS domain tags
-    fn chain_id_str(&self) -> String {
-        format!("protocore-{}", self.chain_context.chain_id)
-    }
-
-    /// Create a domain tag for the given message type
-    fn domain_tag(&self, msg_type: MessageType) -> DomainTag {
-        DomainTag::new(msg_type, self.chain_id_str())
     }
 
     /// Start consensus at a specific height
@@ -498,7 +507,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         let mut proposal = Proposal::new(height, round, block, valid_round);
         proposal.signature = self.private_key.sign_with_domain(
             &proposal.signing_bytes_with_context(&self.chain_context),
-            &self.domain_tag(MessageType::Proposal),
+            &self.proposal_domain,
         );
 
         info!(
@@ -561,7 +570,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         if !proposal.signature.verify_with_domain(
             &proposal.signing_bytes_with_context(&self.chain_context),
             &pubkey,
-            &self.domain_tag(MessageType::Proposal),
+            &self.proposal_domain,
         ) {
             warn!(
                 height = proposal.height,
@@ -757,7 +766,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         );
         vote.signature = self.private_key.sign_with_domain(
             &vote.signing_bytes_with_context(&self.chain_context),
-            &self.domain_tag(MessageType::Prevote),
+            &self.prevote_domain,
         );
 
         debug!(
@@ -1008,7 +1017,7 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
         );
         vote.signature = self.private_key.sign_with_domain(
             &vote.signing_bytes_with_context(&self.chain_context),
-            &self.domain_tag(MessageType::Precommit),
+            &self.precommit_domain,
         );
 
         debug!(
@@ -1158,9 +1167,8 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
 
         // Aggregate signatures with domain verification
         let sig_refs: Vec<&BlsSignature> = signatures.iter().collect();
-        let precommit_domain = self.domain_tag(MessageType::Precommit);
         let aggregate_signature =
-            BlsSignature::aggregate_with_domain(&sig_refs, &precommit_domain)
+            BlsSignature::aggregate_with_domain(&sig_refs, &self.precommit_domain)
                 .unwrap_or_else(|_| BlsSignature::default());
 
         FinalityCert::new(block.header.height, block_hash, aggregate_signature, bitmap)

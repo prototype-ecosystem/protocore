@@ -50,10 +50,7 @@
 //! let encoded = evidence.encode_for_submission();
 //! ```
 
-use protocore_crypto::{
-    bls::{DomainTag, MessageType},
-    keccak256, Hash,
-};
+use protocore_crypto::{keccak256, Hash};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -227,11 +224,7 @@ impl EquivocationEvidence {
             .ok_or(EvidenceError::ValidatorNotFound(self.validator_id))?;
 
         // Build domain tag for the vote type
-        let chain_id_str = format!("protocore-{}", chain_context.chain_id);
-        let domain = match self.vote_a.vote_type {
-            VoteType::Prevote => DomainTag::new(MessageType::Prevote, &chain_id_str),
-            VoteType::Precommit => DomainTag::new(MessageType::Precommit, &chain_id_str),
-        };
+        let domain = chain_context.domain_tag_for_vote(self.vote_a.vote_type);
 
         // Verify signature on vote A with chain context
         if !self.vote_a.signature.verify_with_domain(
@@ -693,11 +686,7 @@ mod tests {
         validator_id: ValidatorId,
     ) -> Vote {
         let ctx = test_chain_context();
-        let chain_id_str = format!("protocore-{}", ctx.chain_id);
-        let domain = match vote_type {
-            VoteType::Prevote => DomainTag::new(MessageType::Prevote, &chain_id_str),
-            VoteType::Precommit => DomainTag::new(MessageType::Precommit, &chain_id_str),
-        };
+        let domain = ctx.domain_tag_for_vote(vote_type);
         let mut vote = Vote::new(vote_type, height, round, block_hash, validator_id);
         vote.signature = private_key.sign_with_domain(
             &vote.signing_bytes_with_context(&ctx),

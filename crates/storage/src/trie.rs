@@ -196,18 +196,12 @@ impl TrieNode {
             return Ok(TrieNode::Empty);
         }
         let rlp = rlp::Rlp::new(data);
-        let item_count = rlp
-            .item_count()
-            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+        let item_count = rlp.item_count()?;
 
         match item_count {
             2 => {
-                let path: Vec<u8> = rlp
-                    .val_at(0)
-                    .map_err(|e| StorageError::Serialization(e.to_string()))?;
-                let raw: Vec<u8> = rlp
-                    .val_at(1)
-                    .map_err(|e| StorageError::Serialization(e.to_string()))?;
+                let path: Vec<u8> = rlp.val_at(0)?;
+                let raw: Vec<u8> = rlp.val_at(1)?;
                 // Distinguish leaf vs extension: if second element is 32 bytes it's
                 // a hash (extension child), otherwise it's a value (leaf).
                 // A more precise check uses the HP-encoded path prefix nibble.
@@ -229,18 +223,14 @@ impl TrieNode {
             17 => {
                 let mut children: [Option<Hash>; 16] = [None; 16];
                 for i in 0..16 {
-                    let child_data: Vec<u8> = rlp
-                        .val_at(i)
-                        .map_err(|e| StorageError::Serialization(e.to_string()))?;
+                    let child_data: Vec<u8> = rlp.val_at(i)?;
                     if child_data.len() == 32 {
                         let mut hash = [0u8; 32];
                         hash.copy_from_slice(&child_data);
                         children[i] = Some(hash);
                     }
                 }
-                let value_data: Vec<u8> = rlp
-                    .val_at(16)
-                    .map_err(|e| StorageError::Serialization(e.to_string()))?;
+                let value_data: Vec<u8> = rlp.val_at(16)?;
                 let value = if value_data.is_empty() {
                     None
                 } else {

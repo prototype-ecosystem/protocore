@@ -41,15 +41,9 @@ pub static CONSENSUS_SIGNERS: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new("consensus_signers", "Number of signers in last finality cert").unwrap()
 });
 
-/// Connected peers
-pub static P2P_PEERS_CONNECTED: Lazy<IntGauge> = Lazy::new(|| {
-    IntGauge::new("p2p_peers_connected", "Connected peers").unwrap()
-});
-
-/// Total gossip messages received
-pub static P2P_MESSAGES_RECEIVED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    IntCounter::new("p2p_messages_received_total", "Gossip messages received").unwrap()
-});
+// NOTE: P2P metrics (p2p_peers_connected, p2p_messages_received_total) are
+// defined in `protocore_p2p::network` and registered with the global Prometheus
+// registry on first access. They are gathered automatically by `prometheus::gather()`.
 
 /// Total RPC requests handled
 pub static RPC_REQUESTS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
@@ -82,8 +76,6 @@ pub fn register_all() {
         Box::new(CONSENSUS_ROUND.clone()),
         Box::new(BLOCKS_COMMITTED_TOTAL.clone()),
         Box::new(CONSENSUS_SIGNERS.clone()),
-        Box::new(P2P_PEERS_CONNECTED.clone()),
-        Box::new(P2P_MESSAGES_RECEIVED_TOTAL.clone()),
         Box::new(RPC_REQUESTS_TOTAL.clone()),
         Box::new(EVM_TRANSACTIONS_TOTAL.clone()),
         Box::new(EVM_GAS_USED_TOTAL.clone()),
@@ -92,8 +84,7 @@ pub fn register_all() {
     for metric in metrics {
         if let Err(e) = registry.register(metric) {
             // AlreadyReg is fine (e.g., tests calling register_all multiple times)
-            let msg = e.to_string();
-            if !msg.contains("previously registered") {
+            if !matches!(e, prometheus::Error::AlreadyReg) {
                 panic!("Failed to register metric: {}", e);
             }
         }

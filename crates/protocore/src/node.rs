@@ -2090,10 +2090,13 @@ impl Node {
 
         let mut blocks = Vec::new();
 
+        use std::fmt::Write;
+        let mut key_buf = String::with_capacity(32);
         for height in start..=end {
             // Look up block hash from metadata (key: "block_hash_{height}")
-            let height_key = format!("block_hash_{}", height);
-            match database.get_metadata(height_key.as_bytes()) {
+            key_buf.clear();
+            write!(key_buf, "block_hash_{}", height).unwrap();
+            match database.get_metadata(key_buf.as_bytes()) {
                 Ok(Some(hash_bytes)) => {
                     // Fetch block data using the hash
                     match database.get_block(&hash_bytes) {

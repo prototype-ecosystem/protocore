@@ -73,18 +73,10 @@ impl Account {
     /// Decode an account from RLP bytes
     pub fn decode(data: &[u8]) -> Result<Self> {
         let rlp = rlp::Rlp::new(data);
-        let nonce: u64 = rlp
-            .val_at(0)
-            .map_err(|e| StorageError::Serialization(e.to_string()))?;
-        let balance: u128 = rlp
-            .val_at(1)
-            .map_err(|e| StorageError::Serialization(e.to_string()))?;
-        let storage_root_bytes: Vec<u8> = rlp
-            .val_at(2)
-            .map_err(|e| StorageError::Serialization(e.to_string()))?;
-        let code_hash_bytes: Vec<u8> = rlp
-            .val_at(3)
-            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+        let nonce: u64 = rlp.val_at(0)?;
+        let balance: u128 = rlp.val_at(1)?;
+        let storage_root_bytes: Vec<u8> = rlp.val_at(2)?;
+        let code_hash_bytes: Vec<u8> = rlp.val_at(3)?;
 
         let mut storage_root = EMPTY_ROOT;
         if storage_root_bytes.len() == 32 {
@@ -413,14 +405,16 @@ impl StateDB {
 
     /// Create database key for account
     fn account_db_key(&self, address: &Address) -> Vec<u8> {
-        let mut key = vec![0x00]; // Account prefix
+        let mut key = Vec::with_capacity(1 + 20); // prefix + address
+        key.push(0x00);
         key.extend(address);
         key
     }
 
     /// Create database key for storage
     fn storage_db_key(&self, address: &Address, slot: &Hash) -> Vec<u8> {
-        let mut key = vec![0x01]; // Storage prefix
+        let mut key = Vec::with_capacity(1 + 20 + 32); // prefix + address + slot
+        key.push(0x01);
         key.extend(address);
         key.extend(slot);
         key
@@ -557,12 +551,15 @@ impl StateDB {
                     account.storage_root = storage_trie.root();
                 }
 
+                // Encode once and reuse for both trie and DB
+                let encoded = account.encode();
+
                 // Update state trie
-                self.state_trie.insert(address, &account.encode())?;
+                self.state_trie.insert(address, &encoded)?;
 
                 // Persist to database
                 let key = self.account_db_key(address);
-                batch.put_cf(&cf, &key, &account.encode());
+                batch.put_cf(&cf, &key, &encoded);
             } else {
                 // Account deleted
                 let _ = self.state_trie.delete(address);

@@ -10,12 +10,15 @@
 //! - [`Validator`] and [`ValidatorSet`] - Validator management
 
 use protocore_crypto::{
-    bls::{BlsPublicKey, BlsSignature},
+    bls::{BlsPublicKey, BlsSignature, DomainTag, MessageType},
     Hash,
 };
 use protocore_types::{Block, H256};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
+
+/// Prefix used when building BLS domain tags for chain-specific signing.
+pub const DOMAIN_TAG_PREFIX: &str = "protocore";
 
 /// Unique identifier for a validator (index in validator set)
 pub type ValidatorId = u64;
@@ -66,6 +69,25 @@ impl ChainContext {
             chain_id: 31337,
             genesis_hash: [0u8; 32],
         }
+    }
+
+    /// Build the chain_id string used for BLS domain tags (e.g. "protocore-31337").
+    pub fn chain_id_str(&self) -> String {
+        format!("{}-{}", DOMAIN_TAG_PREFIX, self.chain_id)
+    }
+
+    /// Create a domain tag for the given vote type (Prevote or Precommit).
+    pub fn domain_tag_for_vote(&self, vote_type: VoteType) -> DomainTag {
+        let chain_id_str = self.chain_id_str();
+        match vote_type {
+            VoteType::Prevote => DomainTag::new(MessageType::Prevote, &chain_id_str),
+            VoteType::Precommit => DomainTag::new(MessageType::Precommit, &chain_id_str),
+        }
+    }
+
+    /// Create a domain tag for proposal messages.
+    pub fn proposal_domain_tag(&self) -> DomainTag {
+        DomainTag::new(MessageType::Proposal, &self.chain_id_str())
     }
 
     /// Encode the chain context to bytes for inclusion in signing data

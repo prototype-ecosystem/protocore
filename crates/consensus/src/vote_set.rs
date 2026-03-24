@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use protocore_crypto::{
-    bls::{BlsSignature, DomainTag, MessageType},
+    bls::BlsSignature,
     Hash,
 };
 use tracing::{debug, trace, warn};
@@ -142,11 +142,7 @@ impl VoteSet {
             .ok_or(VoteSetError::InvalidValidator(vote.validator_id))?;
 
         // Verify signature with chain context and domain separation for replay protection
-        let chain_id_str = format!("protocore-{}", chain_context.chain_id);
-        let domain = match vote.vote_type {
-            VoteType::Prevote => DomainTag::new(MessageType::Prevote, &chain_id_str),
-            VoteType::Precommit => DomainTag::new(MessageType::Precommit, &chain_id_str),
-        };
+        let domain = chain_context.domain_tag_for_vote(vote.vote_type);
         if !vote.signature.verify_with_domain(
             &vote.signing_bytes_with_context(chain_context),
             &validator.pubkey,

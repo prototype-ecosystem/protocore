@@ -10,7 +10,7 @@ use protocore_consensus::{
     ChainContext, HeightVoteSet, Validator, ValidatorId, ValidatorSet, Vote, VoteSet, VoteSetError,
     VoteType, NIL_HASH,
 };
-use protocore_crypto::bls::{BlsPrivateKey, DomainTag, MessageType};
+use protocore_crypto::bls::BlsPrivateKey;
 
 /// Test chain context used across all vote set tests
 fn test_chain_context() -> ChainContext {
@@ -45,11 +45,7 @@ fn create_signed_vote(
     key: &BlsPrivateKey,
 ) -> Vote {
     let ctx = test_chain_context();
-    let chain_id_str = format!("protocore-{}", ctx.chain_id);
-    let domain = match vote_type {
-        VoteType::Prevote => DomainTag::new(MessageType::Prevote, &chain_id_str),
-        VoteType::Precommit => DomainTag::new(MessageType::Precommit, &chain_id_str),
-    };
+    let domain = ctx.domain_tag_for_vote(vote_type);
     let mut vote = Vote::new(vote_type, height, round, block_hash, validator_id);
     vote.signature = key.sign_with_domain(&vote.signing_bytes_with_context(&ctx), &domain);
     vote
@@ -120,8 +116,7 @@ fn test_invalid_signature_rejected() {
 
     // Sign with wrong key (should still be rejected)
     let ctx = test_chain_context();
-    let chain_id_str = format!("protocore-{}", ctx.chain_id);
-    let domain = DomainTag::new(MessageType::Prevote, &chain_id_str);
+    let domain = ctx.domain_tag_for_vote(VoteType::Prevote);
     let mut vote = Vote::new(VoteType::Prevote, 1, 0, [1u8; 32], 0);
     vote.signature = keys[1].sign_with_domain(&vote.signing_bytes_with_context(&ctx), &domain); // Wrong key!
 
