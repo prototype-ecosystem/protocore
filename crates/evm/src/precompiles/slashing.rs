@@ -32,7 +32,7 @@
 
 use alloy_primitives::{Address, Bytes, B256, U256};
 use protocore_consensus::evidence::{EquivocationEvidence, EVIDENCE_MAX_AGE_BLOCKS};
-use protocore_consensus::types::{ValidatorId, ValidatorSet, Vote, VoteType};
+use protocore_consensus::types::{ChainContext, ValidatorId, ValidatorSet, Vote, VoteType};
 use protocore_crypto::bls::BlsSignature;
 use revm::Database;
 use serde::{Deserialize, Serialize};
@@ -192,6 +192,9 @@ pub struct SlashingState {
     /// Validator set for signature verification (updated each epoch)
     #[serde(skip)]
     pub validator_set: Option<ValidatorSet>,
+    /// Chain context for replay-safe evidence verification
+    #[serde(skip)]
+    pub chain_context: ChainContext,
 }
 
 /// Slashing precompile implementation
@@ -276,10 +279,12 @@ impl SlashingPrecompile {
             .clone()
             .ok_or_else(|| PrecompileError::InvalidInput("validator set not available".into()))?;
 
-        // Validate the evidence (verifies signatures)
-        evidence.validate(&validator_set).map_err(|e| {
-            PrecompileError::InvalidEvidence(format!("evidence validation failed: {}", e))
-        })?;
+        // Validate the evidence (verifies signatures with chain context for replay protection)
+        evidence
+            .validate(&validator_set, &state.chain_context)
+            .map_err(|e| {
+                PrecompileError::InvalidEvidence(format!("evidence validation failed: {}", e))
+            })?;
 
         // Get the validator's address from their ID
         let validator = validator_set
@@ -607,6 +612,14 @@ impl SlashingPrecompile {
     /// the validator set used for evidence verification.
     pub fn set_validator_set(state: &mut SlashingState, validator_set: ValidatorSet) {
         state.validator_set = Some(validator_set);
+    }
+
+    /// Set the chain context for evidence signature verification
+    ///
+    /// This must be configured at node startup to ensure evidence
+    /// signatures are verified against the correct chain context.
+    pub fn set_chain_context(state: &mut SlashingState, chain_context: ChainContext) {
+        state.chain_context = chain_context;
     }
 
     /// Create ValidatorSlashed event log

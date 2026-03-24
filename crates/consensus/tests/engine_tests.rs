@@ -2,7 +2,9 @@
 
 use protocore_consensus::timeout::TimeoutConfig;
 use protocore_consensus::timeout::TimeoutInfo;
-use protocore_consensus::types::{CommittedBlock, ConsensusMessage, Validator, ValidatorSet};
+use protocore_consensus::types::{
+    ChainContext, CommittedBlock, ConsensusMessage, Validator, ValidatorSet,
+};
 use protocore_consensus::{BlockBuilder, BlockValidator, ConsensusEngine, ConsensusState, Step};
 use protocore_crypto::bls::BlsPrivateKey;
 use protocore_crypto::Hash;
@@ -62,6 +64,7 @@ fn create_test_engine() -> (
         network_tx,
         commit_tx,
         timeout_tx,
+        ChainContext::testnet(),
     );
 
     (engine, network_rx, commit_rx, timeout_rx)

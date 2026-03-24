@@ -40,6 +40,9 @@ bytes = "1.5"
 # Cryptographic hashing
 sha3 = "0.10"
 
+# RLP encoding
+rlp = "0.5"
+
 # Hex encoding for addresses and data
 hex = "0.4"
 

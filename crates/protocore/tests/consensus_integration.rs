@@ -152,7 +152,7 @@ fn test_consensus_channel_types() {
 fn test_consensus_engine_creation() {
     use async_trait::async_trait;
     use protocore_consensus::{
-        BlockBuilder, BlockValidator, CommittedBlock, ConsensusMessage, TimeoutInfo,
+        BlockBuilder, BlockValidator, ChainContext, CommittedBlock, ConsensusMessage, TimeoutInfo,
     };
     use protocore_consensus::{ConsensusEngine, TimeoutConfig, Validator, ValidatorSet};
     use protocore_types::{Address, Block, BlockHeader, H256};
@@ -215,6 +215,7 @@ fn test_consensus_engine_creation() {
         network_tx,
         commit_tx,
         timeout_tx,
+        ChainContext::testnet(),
     );
 
     // Verify engine was created (engine starts at height 1 to build the first block)

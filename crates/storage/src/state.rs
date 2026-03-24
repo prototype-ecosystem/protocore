@@ -8,7 +8,7 @@
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, trace};
 
@@ -60,14 +60,47 @@ impl Account {
         self.code_hash != EMPTY_HASH
     }
 
-    /// Encode the account for storage
+    /// Encode the account for storage using RLP (Ethereum-compatible)
     pub fn encode(&self) -> Vec<u8> {
-        bincode::serialize(self).unwrap_or_default()
+        let mut stream = rlp::RlpStream::new_list(4);
+        stream.append(&self.nonce);
+        stream.append(&self.balance);
+        stream.append(&self.storage_root.as_ref());
+        stream.append(&self.code_hash.as_ref());
+        stream.out().to_vec()
     }
 
-    /// Decode an account from bytes
+    /// Decode an account from RLP bytes
     pub fn decode(data: &[u8]) -> Result<Self> {
-        bincode::deserialize(data).map_err(|e| StorageError::Serialization(e.to_string()))
+        let rlp = rlp::Rlp::new(data);
+        let nonce: u64 = rlp
+            .val_at(0)
+            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+        let balance: u128 = rlp
+            .val_at(1)
+            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+        let storage_root_bytes: Vec<u8> = rlp
+            .val_at(2)
+            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+        let code_hash_bytes: Vec<u8> = rlp
+            .val_at(3)
+            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+
+        let mut storage_root = EMPTY_ROOT;
+        if storage_root_bytes.len() == 32 {
+            storage_root.copy_from_slice(&storage_root_bytes);
+        }
+        let mut code_hash = EMPTY_HASH;
+        if code_hash_bytes.len() == 32 {
+            code_hash.copy_from_slice(&code_hash_bytes);
+        }
+
+        Ok(Self {
+            nonce,
+            balance,
+            code_hash,
+            storage_root,
+        })
     }
 }
 
@@ -139,10 +172,10 @@ pub struct StateDB {
     account_cache: RwLock<HashMap<Address, Option<Account>>>,
     /// Storage cache
     storage_cache: RwLock<HashMap<(Address, Hash), Hash>>,
-    /// Dirty accounts (modified since last commit)
-    dirty_accounts: RwLock<HashSet<Address>>,
-    /// Dirty storage slots
-    dirty_storage: RwLock<HashSet<(Address, Hash)>>,
+    /// Dirty accounts (modified since last commit) — BTreeSet for deterministic iteration
+    dirty_accounts: RwLock<BTreeSet<Address>>,
+    /// Dirty storage slots — BTreeSet for deterministic iteration
+    dirty_storage: RwLock<BTreeSet<(Address, Hash)>>,
     /// Snapshot counter
     snapshot_id: RwLock<u64>,
     /// Snapshots
@@ -163,8 +196,8 @@ impl StateDB {
             storage_tries: RwLock::new(HashMap::new()),
             account_cache: RwLock::new(HashMap::new()),
             storage_cache: RwLock::new(HashMap::new()),
-            dirty_accounts: RwLock::new(HashSet::new()),
-            dirty_storage: RwLock::new(HashSet::new()),
+            dirty_accounts: RwLock::new(BTreeSet::new()),
+            dirty_storage: RwLock::new(BTreeSet::new()),
             snapshot_id: RwLock::new(0),
             snapshots: RwLock::new(Vec::new()),
             current_diff: RwLock::new(StateDiff::new(root)),

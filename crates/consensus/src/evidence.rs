@@ -44,17 +44,20 @@
 //! let evidence = EquivocationEvidence::new(vote_a, vote_b)?;
 //!
 //! // Validate signatures
-//! evidence.validate(&validator_set)?;
+//! evidence.validate(&validator_set, &chain_context)?;
 //!
 //! // Serialize for on-chain submission
 //! let encoded = evidence.encode_for_submission();
 //! ```
 
-use protocore_crypto::{keccak256, Hash};
+use protocore_crypto::{
+    bls::{DomainTag, MessageType},
+    keccak256, Hash,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::types::{ValidatorId, ValidatorSet, Vote, VoteType};
+use crate::types::{ChainContext, ValidatorId, ValidatorSet, Vote, VoteType};
 
 /// Maximum age of evidence in blocks (~24 hours at 2s blocks)
 ///
@@ -207,32 +210,44 @@ impl EquivocationEvidence {
     /// # Arguments
     ///
     /// * `validator_set` - Current validator set for signature verification
+    /// * `chain_context` - Chain context for replay-safe signature verification
     ///
     /// # Returns
     ///
     /// `Ok(())` if the evidence is cryptographically valid,
     /// or an error describing the validation failure.
-    pub fn validate(&self, validator_set: &ValidatorSet) -> Result<(), EvidenceError> {
+    pub fn validate(
+        &self,
+        validator_set: &ValidatorSet,
+        chain_context: &ChainContext,
+    ) -> Result<(), EvidenceError> {
         // Get the validator
         let validator = validator_set
             .get_validator(self.validator_id)
             .ok_or(EvidenceError::ValidatorNotFound(self.validator_id))?;
 
-        // Verify signature on vote A
-        if !self
-            .vote_a
-            .signature
-            .verify(&self.vote_a.signing_bytes(), &validator.pubkey)
-        {
+        // Build domain tag for the vote type
+        let chain_id_str = format!("protocore-{}", chain_context.chain_id);
+        let domain = match self.vote_a.vote_type {
+            VoteType::Prevote => DomainTag::new(MessageType::Prevote, &chain_id_str),
+            VoteType::Precommit => DomainTag::new(MessageType::Precommit, &chain_id_str),
+        };
+
+        // Verify signature on vote A with chain context
+        if !self.vote_a.signature.verify_with_domain(
+            &self.vote_a.signing_bytes_with_context(chain_context),
+            &validator.pubkey,
+            &domain,
+        ) {
             return Err(EvidenceError::InvalidSignatureA(self.validator_id));
         }
 
-        // Verify signature on vote B
-        if !self
-            .vote_b
-            .signature
-            .verify(&self.vote_b.signing_bytes(), &validator.pubkey)
-        {
+        // Verify signature on vote B with chain context
+        if !self.vote_b.signature.verify_with_domain(
+            &self.vote_b.signing_bytes_with_context(chain_context),
+            &validator.pubkey,
+            &domain,
+        ) {
             return Err(EvidenceError::InvalidSignatureB(self.validator_id));
         }
 
@@ -654,6 +669,11 @@ mod tests {
     use crate::types::{Validator, ValidatorSet, VoteType};
     use protocore_crypto::bls::BlsPrivateKey;
 
+    /// Test chain context used across all evidence tests
+    fn test_chain_context() -> ChainContext {
+        ChainContext::testnet()
+    }
+
     fn create_test_validator_set() -> (ValidatorSet, BlsPrivateKey) {
         let private_key = BlsPrivateKey::random();
         let pubkey = private_key.public_key();
@@ -672,8 +692,17 @@ mod tests {
         block_hash: Hash,
         validator_id: ValidatorId,
     ) -> Vote {
+        let ctx = test_chain_context();
+        let chain_id_str = format!("protocore-{}", ctx.chain_id);
+        let domain = match vote_type {
+            VoteType::Prevote => DomainTag::new(MessageType::Prevote, &chain_id_str),
+            VoteType::Precommit => DomainTag::new(MessageType::Precommit, &chain_id_str),
+        };
         let mut vote = Vote::new(vote_type, height, round, block_hash, validator_id);
-        vote.signature = private_key.sign(&vote.signing_bytes());
+        vote.signature = private_key.sign_with_domain(
+            &vote.signing_bytes_with_context(&ctx),
+            &domain,
+        );
         vote
     }
 
@@ -696,8 +725,9 @@ mod tests {
         // Create evidence
         let evidence = EquivocationEvidence::new(vote_a, vote_b).unwrap();
 
-        // Validate
-        assert!(evidence.validate(&validator_set).is_ok());
+        // Validate with chain context
+        let ctx = test_chain_context();
+        assert!(evidence.validate(&validator_set, &ctx).is_ok());
         assert_eq!(evidence.height, 100);
         assert_eq!(evidence.validator_id, 0);
     }
@@ -762,7 +792,8 @@ mod tests {
         let vote_b = create_signed_vote(&wrong_key, VoteType::Prevote, 100, 0, [2u8; 32], 0);
 
         let evidence = EquivocationEvidence::new(vote_a, vote_b).unwrap();
-        let result = evidence.validate(&validator_set);
+        let ctx = test_chain_context();
+        let result = evidence.validate(&validator_set, &ctx);
         assert!(matches!(result, Err(EvidenceError::InvalidSignatureB(0))));
     }
 

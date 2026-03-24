@@ -7,7 +7,7 @@
 use bytes::Bytes;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::{keccak256, Hash, Result, StorageError, EMPTY_ROOT};
@@ -157,14 +157,102 @@ impl TrieNode {
         keccak256(&encoded)
     }
 
-    /// Encode the node for storage
+    /// Encode the node for storage using RLP (Ethereum-compatible)
     pub fn encode(&self) -> Vec<u8> {
-        bincode::serialize(self).unwrap_or_default()
+        match self {
+            TrieNode::Empty => rlp::encode(&Vec::<u8>::new()).to_vec(),
+            TrieNode::Leaf { path, value } => {
+                let mut stream = rlp::RlpStream::new_list(2);
+                stream.append(&path.as_slice());
+                stream.append(&value.as_slice());
+                stream.out().to_vec()
+            }
+            TrieNode::Extension { path, child } => {
+                let mut stream = rlp::RlpStream::new_list(2);
+                stream.append(&path.as_slice());
+                stream.append(&child.as_ref());
+                stream.out().to_vec()
+            }
+            TrieNode::Branch { children, value } => {
+                let mut stream = rlp::RlpStream::new_list(17);
+                for child in children.iter() {
+                    match child {
+                        Some(hash) => stream.append(&hash.as_ref()),
+                        None => stream.append_empty_data(),
+                    };
+                }
+                match value {
+                    Some(v) => stream.append(&v.as_slice()),
+                    None => stream.append_empty_data(),
+                };
+                stream.out().to_vec()
+            }
+        }
     }
 
-    /// Decode a node from bytes
+    /// Decode a node from RLP bytes
     pub fn decode(data: &[u8]) -> Result<Self> {
-        bincode::deserialize(data).map_err(|e| StorageError::Serialization(e.to_string()))
+        if data.is_empty() || data == [0x80] {
+            return Ok(TrieNode::Empty);
+        }
+        let rlp = rlp::Rlp::new(data);
+        let item_count = rlp
+            .item_count()
+            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+
+        match item_count {
+            2 => {
+                let path: Vec<u8> = rlp
+                    .val_at(0)
+                    .map_err(|e| StorageError::Serialization(e.to_string()))?;
+                let raw: Vec<u8> = rlp
+                    .val_at(1)
+                    .map_err(|e| StorageError::Serialization(e.to_string()))?;
+                // Distinguish leaf vs extension: if second element is 32 bytes it's
+                // a hash (extension child), otherwise it's a value (leaf).
+                // A more precise check uses the HP-encoded path prefix nibble.
+                if raw.len() == 32 && !path.is_empty() {
+                    let hp_prefix = path[0] >> 4;
+                    if hp_prefix == 2 || hp_prefix == 3 {
+                        // Leaf (HP flag bit set)
+                        Ok(TrieNode::Leaf { path, value: raw })
+                    } else {
+                        // Extension
+                        let mut child = [0u8; 32];
+                        child.copy_from_slice(&raw);
+                        Ok(TrieNode::Extension { path, child })
+                    }
+                } else {
+                    Ok(TrieNode::Leaf { path, value: raw })
+                }
+            }
+            17 => {
+                let mut children: [Option<Hash>; 16] = [None; 16];
+                for i in 0..16 {
+                    let child_data: Vec<u8> = rlp
+                        .val_at(i)
+                        .map_err(|e| StorageError::Serialization(e.to_string()))?;
+                    if child_data.len() == 32 {
+                        let mut hash = [0u8; 32];
+                        hash.copy_from_slice(&child_data);
+                        children[i] = Some(hash);
+                    }
+                }
+                let value_data: Vec<u8> = rlp
+                    .val_at(16)
+                    .map_err(|e| StorageError::Serialization(e.to_string()))?;
+                let value = if value_data.is_empty() {
+                    None
+                } else {
+                    Some(value_data)
+                };
+                Ok(TrieNode::Branch { children, value })
+            }
+            _ => Err(StorageError::Serialization(format!(
+                "unexpected RLP item count: {}",
+                item_count
+            ))),
+        }
     }
 }
 
@@ -267,7 +355,7 @@ impl MerkleProof {
 /// Merkle Patricia Trie
 pub struct MerkleTrie {
     /// Node storage (hash -> node)
-    nodes: Arc<RwLock<HashMap<Hash, TrieNode>>>,
+    nodes: Arc<RwLock<BTreeMap<Hash, TrieNode>>>,
     /// Current root hash
     root: RwLock<Hash>,
 }
@@ -276,13 +364,13 @@ impl MerkleTrie {
     /// Create a new empty trie
     pub fn new() -> Self {
         Self {
-            nodes: Arc::new(RwLock::new(HashMap::new())),
+            nodes: Arc::new(RwLock::new(BTreeMap::new())),
             root: RwLock::new(EMPTY_ROOT),
         }
     }
 
     /// Create a trie from an existing root
-    pub fn from_root(root: Hash, nodes: HashMap<Hash, TrieNode>) -> Self {
+    pub fn from_root(root: Hash, nodes: BTreeMap<Hash, TrieNode>) -> Self {
         Self {
             nodes: Arc::new(RwLock::new(nodes)),
             root: RwLock::new(root),
@@ -744,7 +832,7 @@ impl MerkleTrie {
     }
 
     /// Get all nodes (for persistence)
-    pub fn nodes(&self) -> HashMap<Hash, TrieNode> {
+    pub fn nodes(&self) -> BTreeMap<Hash, TrieNode> {
         self.nodes.read().clone()
     }
 

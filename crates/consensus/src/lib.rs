@@ -75,6 +75,7 @@
 //!     network_tx,
 //!     commit_tx,
 //!     timeout_tx,
+//!     ChainContext::testnet(),
 //! );
 //!
 //! // Start consensus at height 1

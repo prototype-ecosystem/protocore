@@ -219,6 +219,7 @@ impl Proposal {
     /// Includes domain separator to prevent cross-context signature replay.
     /// For production use, prefer `signing_bytes_with_context` which includes
     /// chain_id and genesis_hash for cross-chain/cross-fork protection.
+    #[deprecated(note = "Use signing_bytes_with_context() instead for cross-chain replay protection")]
     pub fn signing_bytes(&self) -> Vec<u8> {
         self.signing_bytes_with_context(&ChainContext::default())
     }
@@ -291,6 +292,7 @@ impl Vote {
     /// signature replay. A prevote signature cannot be reused as a precommit.
     /// For production use, prefer `signing_bytes_with_context` which includes
     /// chain_id and genesis_hash for cross-chain/cross-fork protection.
+    #[deprecated(note = "Use signing_bytes_with_context() instead for cross-chain replay protection")]
     pub fn signing_bytes(&self) -> Vec<u8> {
         self.signing_bytes_with_context(&ChainContext::default())
     }

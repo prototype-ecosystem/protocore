@@ -8,10 +8,13 @@
 
 use std::collections::HashMap;
 
-use protocore_crypto::{bls::BlsSignature, Hash};
+use protocore_crypto::{
+    bls::{BlsSignature, DomainTag, MessageType},
+    Hash,
+};
 use tracing::{debug, trace, warn};
 
-use crate::types::{ValidatorId, ValidatorSet, Vote, VoteType, NIL_HASH};
+use crate::types::{ChainContext, ValidatorId, ValidatorSet, Vote, VoteType, NIL_HASH};
 
 /// Error types for vote set operations
 #[derive(Debug, thiserror::Error)]
@@ -100,10 +103,14 @@ impl VoteSet {
     /// Returns `Ok(Some(hash))` if this vote completes a quorum for that hash,
     /// `Ok(None)` if the vote was added but no quorum yet,
     /// or an error if the vote is invalid.
+    ///
+    /// The `chain_context` parameter ensures vote signatures are verified
+    /// with the correct chain context for cross-chain replay protection.
     pub fn add_vote(
         &mut self,
         vote: Vote,
         validator_set: &ValidatorSet,
+        chain_context: &ChainContext,
     ) -> Result<Option<Hash>, VoteSetError> {
         // Validate vote matches this set
         if vote.height != self.height {
@@ -134,11 +141,17 @@ impl VoteSet {
             .get_validator(vote.validator_id)
             .ok_or(VoteSetError::InvalidValidator(vote.validator_id))?;
 
-        // Verify signature
-        if !vote
-            .signature
-            .verify(&vote.signing_bytes(), &validator.pubkey)
-        {
+        // Verify signature with chain context and domain separation for replay protection
+        let chain_id_str = format!("protocore-{}", chain_context.chain_id);
+        let domain = match vote.vote_type {
+            VoteType::Prevote => DomainTag::new(MessageType::Prevote, &chain_id_str),
+            VoteType::Precommit => DomainTag::new(MessageType::Precommit, &chain_id_str),
+        };
+        if !vote.signature.verify_with_domain(
+            &vote.signing_bytes_with_context(chain_context),
+            &validator.pubkey,
+            &domain,
+        ) {
             warn!(validator_id = vote.validator_id, "Invalid vote signature");
             return Err(VoteSetError::InvalidSignature(vote.validator_id));
         }

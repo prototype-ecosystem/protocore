@@ -775,13 +775,9 @@ where
         self.db.state_root()
     }
 
-    /// Compute receipts root using RLP-encoded receipts
-    ///
-    /// Computes a Keccak256 hash of the RLP-encoded receipt list.
-    /// Note: For full Ethereum compatibility, this should use an ordered trie
-    /// with receipt indices as keys.
+    /// Compute receipts root using an ordered Merkle Patricia Trie (Ethereum-compatible)
     fn compute_receipts_root(&self, receipts: &[Receipt]) -> B256 {
-        use sha3::{Digest, Keccak256};
+        use protocore_storage::trie::MerkleTrie;
 
         if receipts.is_empty() {
             // Empty trie root (keccak256 of RLP empty string)
@@ -792,29 +788,40 @@ where
             ]);
         }
 
-        // Encode receipts using a simple concatenation scheme
-        // Note: Full Ethereum compatibility requires MPT with index keys
-        let mut hasher = Keccak256::new();
+        let trie = MerkleTrie::new();
         for (i, receipt) in receipts.iter().enumerate() {
-            // Encode receipt fields
-            hasher.update([receipt.status]);
-            hasher.update(receipt.cumulative_gas_used.to_le_bytes());
-            hasher.update(&receipt.logs_bloom);
-            hasher.update((receipt.logs.len() as u32).to_le_bytes());
-            for log in &receipt.logs {
-                hasher.update(log.address.as_slice());
-                hasher.update((log.topics.len() as u32).to_le_bytes());
-                for topic in &log.topics {
-                    hasher.update(topic.as_slice());
-                }
-                hasher.update((log.data.len() as u32).to_le_bytes());
-                hasher.update(&log.data);
+            let key = rlp::encode(&i);
+            let value = Self::rlp_encode_receipt(receipt);
+            if let Err(e) = trie.insert(&key, &value) {
+                tracing::warn!("Failed to insert receipt {} into trie: {}", i, e);
             }
-            // Include index for ordering
-            hasher.update((i as u32).to_le_bytes());
         }
 
-        B256::from_slice(&hasher.finalize())
+        B256::from_slice(&trie.root())
+    }
+
+    /// RLP-encode a receipt for trie insertion
+    fn rlp_encode_receipt(receipt: &Receipt) -> Vec<u8> {
+        let mut stream = rlp::RlpStream::new_list(4);
+        stream.append(&(receipt.status as u64));
+        stream.append(&receipt.cumulative_gas_used);
+        let bloom_bytes: &[u8] = receipt.logs_bloom.as_ref();
+        stream.append(&bloom_bytes);
+        // Encode logs as RLP list
+        stream.begin_list(receipt.logs.len());
+        for log in &receipt.logs {
+            stream.begin_list(3);
+            let addr_bytes: &[u8] = log.address.as_slice();
+            stream.append(&addr_bytes);
+            stream.begin_list(log.topics.len());
+            for topic in &log.topics {
+                let topic_bytes: &[u8] = topic.as_slice();
+                stream.append(&topic_bytes);
+            }
+            let data_bytes: &[u8] = log.data.as_ref();
+            stream.append(&data_bytes);
+        }
+        stream.out().to_vec()
     }
 
     /// Calculate the next block's base fee

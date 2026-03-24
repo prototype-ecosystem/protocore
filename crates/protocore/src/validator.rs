@@ -19,7 +19,7 @@ use tracing::{debug, error, info, warn};
 use alloy_primitives::{Address as AlloyAddress, Bytes, U256, B256};
 use protocore_config::Config;
 use protocore_consensus::{
-    CommittedBlock, ConsensusEngine, ConsensusMessage, TimeoutConfig, TimeoutInfo,
+    ChainContext, CommittedBlock, ConsensusEngine, ConsensusMessage, TimeoutConfig, TimeoutInfo,
     Validator as ConsensusValidator, ValidatorSet as ConsensusValidatorSet, Vote, VoteType,
 };
 use protocore_crypto::{BlsPrivateKey, BlsPublicKey, BlsSignature};
@@ -522,7 +522,10 @@ impl ValidatorNode {
             self.config.economics.block_gas_limit,
         ));
 
-        // Create the consensus engine
+        // Build chain context from config for replay-safe consensus signing
+        let chain_context = ChainContext::new(self.config.chain.chain_id, [0u8; 32]);
+
+        // Create the consensus engine with chain context
         let engine = ConsensusEngine::new(
             self.validator_id.unwrap(),
             self.keys.bls_private_key.clone(),
@@ -533,6 +536,7 @@ impl ValidatorNode {
             network_tx,
             commit_tx,
             timeout_tx,
+            chain_context,
         );
 
         self.consensus = Some(Arc::new(engine));
@@ -631,6 +635,7 @@ impl ValidatorNode {
             let state_db = Arc::clone(self.node.state_db());
             let mempool = Arc::clone(self.node.mempool());
             let block_time_ms = self.config.consensus.block_time_ms;
+            let config_chain_id = self.config.chain.chain_id;
             tokio::spawn(async move {
                 while let Some(committed) = rx.recv().await {
                     let height = committed.block.header.height;
@@ -645,7 +650,7 @@ impl ValidatorNode {
 
                     // Process transactions using EVM for proper execution
                     let mut tx_hashes = Vec::with_capacity(tx_count);
-                    let chain_id = 31337u64; // TODO: get from config
+                    let chain_id = config_chain_id;
 
                     for tx in &committed.block.transactions {
                         // Get sender address
