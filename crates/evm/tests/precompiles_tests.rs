@@ -15,8 +15,8 @@ fn address_from_low_u64(v: u64) -> Address {
 #[test]
 fn test_address_from_low_u64() {
     let addr = address_from_low_u64(0x1000);
-    assert_eq!(addr.0 .0[19], 0x10);
-    assert_eq!(addr.0 .0[18], 0x00);
+    assert_eq!(addr.0 .0[18], 0x10);
+    assert_eq!(addr.0 .0[19], 0x00);
 
     // First 12 bytes should be zero
     for i in 0..12 {

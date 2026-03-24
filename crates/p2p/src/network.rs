@@ -813,7 +813,7 @@ impl NetworkService {
         use libp2p::request_response::Message as RRMessage;
 
         match event {
-            RREvent::Message { peer, message } => match message {
+            RREvent::Message { peer, message, .. } => match message {
                 RRMessage::Request {
                     request, channel, ..
                 } => {

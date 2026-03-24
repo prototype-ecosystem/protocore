@@ -14,7 +14,7 @@ protocore-types = { path = "../types" }
 protocore-consensus = { path = "../consensus" }
 
 # libp2p with required features
-libp2p = { version = "0.54", features = [
+libp2p = { version = "0.56", features = [
     "tcp",
     "noise",
     "yamux",
@@ -55,7 +55,7 @@ instant = "0.1"
 rand = "0.8"
 
 # Metrics
-prometheus = "0.13"
+prometheus = "0.14"
 once_cell = "1.19"
 
 # Synchronization primitives

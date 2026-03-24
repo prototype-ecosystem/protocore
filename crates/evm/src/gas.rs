@@ -453,7 +453,7 @@ mod tests {
         let config = GasConfig::default();
         let calculator = BaseFeeCalculator::new(config);
 
-        let parent_base_fee = 1_000_000_000u128; // 1 gwei
+        let parent_base_fee = 10_000_000_000u128; // 10 gwei
         let parent_gas_limit = 30_000_000u64;
 
         // At target (50% full), no change

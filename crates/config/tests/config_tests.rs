@@ -11,7 +11,7 @@ use protocore_config::{
 fn test_default_config() {
     let config = Config::default();
     assert_eq!(config.chain.chain_id, 1);
-    assert_eq!(config.consensus.block_time_ms, 2000);
+    assert_eq!(config.consensus.block_time_ms, 6000);
     assert_eq!(config.economics.block_gas_limit, 30_000_000);
 }
 

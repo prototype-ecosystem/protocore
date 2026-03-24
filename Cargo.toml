@@ -59,7 +59,7 @@ revm = { version = "5.0", default-features = false, features = ["std", "serde"] 
 alloy-primitives = { version = "0.6", features = ["serde"] }
 
 # Networking
-libp2p = { version = "0.53", features = ["tcp", "noise", "yamux", "gossipsub", "kad", "identify", "tokio"] }
+libp2p = { version = "0.56", features = ["tcp", "noise", "yamux", "gossipsub", "kad", "identify", "tokio"] }
 
 # Storage
 rocksdb = "0.21"
@@ -75,7 +75,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Metrics
-prometheus = "0.13"
+prometheus = "0.14"
 
 # Utilities
 hex = "0.4"

@@ -164,9 +164,7 @@ impl ProtocoreBehaviour {
 
     /// Unsubscribe from a gossipsub topic
     pub fn unsubscribe(&mut self, topic: &gossipsub::IdentTopic) -> crate::Result<bool> {
-        self.gossipsub
-            .unsubscribe(topic)
-            .map_err(|e| crate::Error::Gossipsub(e.to_string()))
+        Ok(self.gossipsub.unsubscribe(topic))
     }
 
     /// Publish a message to a topic
@@ -224,8 +222,8 @@ impl ProtocoreBehaviour {
         source: &PeerId,
         result: gossipsub::MessageAcceptance,
     ) -> crate::Result<bool> {
-        self.gossipsub
-            .report_message_validation_result(msg_id, source, result)
-            .map_err(|e| crate::Error::Gossipsub(e.to_string()))
+        Ok(self
+            .gossipsub
+            .report_message_validation_result(msg_id, source, result))
     }
 }

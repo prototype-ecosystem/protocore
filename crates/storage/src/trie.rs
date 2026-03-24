@@ -428,15 +428,11 @@ impl MerkleTrie {
                     if common_len < leaf_nibbles.len() {
                         let nibble = leaf_nibbles.0[common_len] as usize;
                         let remaining = leaf_nibbles.slice(common_len + 1);
-                        if remaining.is_empty() {
-                            branch_value = Some(leaf_value.clone());
-                        } else {
-                            let new_leaf = TrieNode::Leaf {
-                                path: remaining.encode_compact(true),
-                                value: leaf_value,
-                            };
-                            branch_children[nibble] = Some(self.store_node(new_leaf)?);
-                        }
+                        let new_leaf = TrieNode::Leaf {
+                            path: remaining.encode_compact(true),
+                            value: leaf_value,
+                        };
+                        branch_children[nibble] = Some(self.store_node(new_leaf)?);
                     } else {
                         branch_value = Some(leaf_value);
                     }
@@ -445,15 +441,11 @@ impl MerkleTrie {
                     if common_len < path.len() {
                         let nibble = path.0[common_len] as usize;
                         let remaining = path.slice(common_len + 1);
-                        if remaining.is_empty() {
-                            branch_value = Some(value.to_vec());
-                        } else {
-                            let new_leaf = TrieNode::Leaf {
-                                path: remaining.encode_compact(true),
-                                value: value.to_vec(),
-                            };
-                            branch_children[nibble] = Some(self.store_node(new_leaf)?);
-                        }
+                        let new_leaf = TrieNode::Leaf {
+                            path: remaining.encode_compact(true),
+                            value: value.to_vec(),
+                        };
+                        branch_children[nibble] = Some(self.store_node(new_leaf)?);
                     } else {
                         branch_value = Some(value.to_vec());
                     }
