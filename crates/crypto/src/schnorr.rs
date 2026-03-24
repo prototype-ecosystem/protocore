@@ -194,6 +194,14 @@ impl SchnorrSecretKey {
         let r_encoded = r_affine.to_encoded_point(true);
         let r: [u8; 32] = r_encoded.x().unwrap().as_slice().try_into().unwrap();
 
+        // BIP-340: if R has odd y, negate k so that R always has even y.
+        // This ensures the verifier can reconstruct R with 0x02 prefix deterministically.
+        let k = if r_encoded.tag() == k256::elliptic_curve::sec1::Tag::CompressedOddY {
+            -k
+        } else {
+            k
+        };
+
         // e = H(R || P || m)
         let e = self.compute_challenge(&r, message);
 
@@ -214,6 +222,13 @@ impl SchnorrSecretKey {
         let r_affine = r_point.to_affine();
         let r_encoded = r_affine.to_encoded_point(true);
         let r: [u8; 32] = r_encoded.x().unwrap().as_slice().try_into().unwrap();
+
+        // BIP-340: if R has odd y, negate k so that R always has even y.
+        let k = if r_encoded.tag() == k256::elliptic_curve::sec1::Tag::CompressedOddY {
+            -k
+        } else {
+            k
+        };
 
         let e = self.compute_challenge(&r, message);
         let s = k + e * self.scalar;
