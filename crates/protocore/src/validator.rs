@@ -23,7 +23,7 @@ use protocore_consensus::{
     Validator as ConsensusValidator, ValidatorSet as ConsensusValidatorSet, Vote, VoteType,
 };
 use protocore_crypto::{BlsPrivateKey, BlsPublicKey, BlsSignature};
-use protocore_evm::{BlockContext, EvmConfig, EvmExecutor, MemoryDb, StateRootProvider, TransactionData};
+use protocore_evm::{BlockContext, EvmConfig, EvmExecutor, StateRootProvider, TransactionData, BLOCKS_PER_EPOCH};
 use protocore_p2p::GossipMessage;
 use protocore_storage::StateDB;
 use protocore_types::{Address, Block};
@@ -987,6 +987,180 @@ impl ValidatorNode {
                         txs = tx_count,
                         "Block persisted to database"
                     );
+
+                    // ---------------------------------------------------------------
+                    // Epoch Boundary Processing
+                    // ---------------------------------------------------------------
+                    // At epoch boundaries, run epoch processing (rewards, unbonding)
+                    // via the EVM executor and then update the consensus validator set
+                    // from the latest staking state.
+                    if height > 0 && height % BLOCKS_PER_EPOCH == 0 {
+                        let epoch = height / BLOCKS_PER_EPOCH;
+                        info!(
+                            height = height,
+                            epoch = epoch,
+                            "Epoch boundary reached — processing epoch transition"
+                        );
+
+                        // Create an EVM executor using the current state to run epoch processing.
+                        // process_epoch_end is called inside execute_block's process_end_of_block,
+                        // but since we execute transactions individually above (not via execute_block),
+                        // we need to trigger epoch processing explicitly here.
+                        let exec_db = ExecutionDb::new(Arc::clone(&state_db));
+                        let evm_config = EvmConfig {
+                            chain_id: config_chain_id,
+                            ..EvmConfig::default()
+                        };
+                        let mut epoch_executor = EvmExecutor::new(exec_db, evm_config);
+
+                        // Create a synthetic block context for epoch processing
+                        let epoch_block_context = BlockContext {
+                            number: height,
+                            timestamp: committed.block.header.timestamp,
+                            gas_limit: 30_000_000,
+                            coinbase: AlloyAddress::ZERO,
+                            base_fee: 1_000_000_000,
+                            prev_randao: B256::ZERO,
+                        };
+
+                        // Execute an empty block which triggers process_end_of_block
+                        // (and therefore process_epoch_end since height % BLOCKS_PER_EPOCH == 0)
+                        match epoch_executor.execute_block(&[], &epoch_block_context) {
+                            Ok(_result) => {
+                                // Apply epoch processing state changes to StateDB
+                                let changes = epoch_executor.db().pending_changes();
+                                for (address, account_changes) in &changes {
+                                    let addr_bytes: [u8; 20] = address.0.into();
+
+                                    // Apply balance changes (rewards credited)
+                                    if let Some(account_info) = &account_changes.account {
+                                        // Update the account balance in StateDB
+                                        let current_balance = state_db.get_balance(&addr_bytes);
+                                        if account_info.balance != U256::from(current_balance) {
+                                            let new_balance_bytes: [u8; 32] = account_info.balance.to_be_bytes();
+                                            // Convert U256 to u128 for StateDB
+                                            let new_balance = u128::from_be_bytes(
+                                                new_balance_bytes[16..32].try_into().unwrap()
+                                            );
+                                            if new_balance > current_balance {
+                                                let reward = new_balance - current_balance;
+                                                if let Err(e) = state_db.add_balance(&addr_bytes, reward) {
+                                                    error!(error = %e, "Failed to credit epoch reward");
+                                                }
+                                                debug!(
+                                                    address = %hex::encode(&addr_bytes),
+                                                    reward = reward,
+                                                    "Credited epoch reward to validator"
+                                                );
+                                            }
+                                        }
+                                    }
+
+                                    // Apply storage changes (staking state updates)
+                                    for (slot, value) in &account_changes.storage {
+                                        let slot_bytes: [u8; 32] = slot.to_be_bytes();
+                                        let value_bytes: [u8; 32] = value.to_be_bytes();
+                                        state_db.set_storage(&addr_bytes, &slot_bytes, value_bytes);
+                                    }
+                                }
+
+                                // Commit the epoch state changes
+                                if let Err(e) = state_db.commit() {
+                                    error!(error = %e, "Failed to commit epoch state changes");
+                                }
+
+                                info!(
+                                    epoch = epoch,
+                                    state_changes = changes.len(),
+                                    "Epoch processing state changes applied"
+                                );
+
+                                // Now read the updated validator set from staking state
+                                // and update the consensus engine
+                                match epoch_executor.get_active_validator_set() {
+                                    Ok(active_vals) if !active_vals.is_empty() => {
+                                        // Build a new ConsensusValidatorSet from staking state
+                                        let mut consensus_validators = Vec::new();
+                                        for (i, val) in active_vals.iter().enumerate() {
+                                            // Parse BLS public key from stored bytes
+                                            if val.pubkey.len() == 48 {
+                                                let pubkey_array: [u8; 48] = val.pubkey[..48]
+                                                    .try_into()
+                                                    .expect("pubkey is 48 bytes");
+                                                match BlsPublicKey::from_bytes(&pubkey_array) {
+                                                    Ok(pubkey) => {
+                                                        let addr_bytes: [u8; 20] = val.address.0.into();
+                                                        consensus_validators.push(
+                                                            ConsensusValidator::new(
+                                                                i as u64,
+                                                                pubkey,
+                                                                addr_bytes,
+                                                                val.total_stake,
+                                                                val.commission,
+                                                            ),
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        warn!(
+                                                            validator = %val.address,
+                                                            error = %e,
+                                                            "Skipping validator with invalid BLS key"
+                                                        );
+                                                    }
+                                                }
+                                            } else {
+                                                warn!(
+                                                    validator = %val.address,
+                                                    pubkey_len = val.pubkey.len(),
+                                                    "Skipping validator with wrong pubkey length"
+                                                );
+                                            }
+                                        }
+
+                                        if !consensus_validators.is_empty() {
+                                            let new_validator_set =
+                                                ConsensusValidatorSet::new(consensus_validators);
+                                            info!(
+                                                epoch = epoch,
+                                                validators = new_validator_set.len(),
+                                                total_stake = new_validator_set.total_stake,
+                                                "Updating consensus validator set from staking state"
+                                            );
+                                            eng.set_validator_set(new_validator_set);
+                                        } else {
+                                            warn!(
+                                                epoch = epoch,
+                                                "No valid validators found in staking state — keeping current set"
+                                            );
+                                        }
+                                    }
+                                    Ok(_) => {
+                                        warn!(
+                                            epoch = epoch,
+                                            "No active validators in staking state — keeping current set"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        // Non-fatal: keep the current validator set
+                                        // This can happen if no staking state exists yet
+                                        // (validators only from genesis config)
+                                        warn!(
+                                            epoch = epoch,
+                                            error = %e,
+                                            "Failed to read validator set from staking state — keeping current set"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!(
+                                    epoch = epoch,
+                                    error = %e,
+                                    "Epoch processing failed — rewards not distributed"
+                                );
+                            }
+                        }
+                    }
 
                     // Update metrics
                     metrics::BLOCKS_COMMITTED_TOTAL.inc();

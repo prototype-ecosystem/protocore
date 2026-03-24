@@ -1305,7 +1305,7 @@ impl StakingPrecompile {
     /// State is stored as JSON, chunked across multiple 32-byte storage slots:
     /// - Slot 0: Length of serialized state in bytes
     /// - Slots 1..n: 32-byte chunks of serialized JSON
-    fn load_state<DB: Database>(db: &mut StateAdapter<DB>) -> Result<StakingState, PrecompileError>
+    pub fn load_state<DB: Database>(db: &mut StateAdapter<DB>) -> Result<StakingState, PrecompileError>
     where
         DB::Error: std::fmt::Debug,
     {
@@ -1350,7 +1350,7 @@ impl StakingPrecompile {
     /// State is stored as JSON, chunked across multiple 32-byte storage slots:
     /// - Slot 0: Length of serialized state in bytes
     /// - Slots 1..n: 32-byte chunks of serialized JSON
-    fn save_state<DB: Database>(
+    pub fn save_state<DB: Database>(
         db: &mut StateAdapter<DB>,
         state: &StakingState,
     ) -> Result<(), PrecompileError>

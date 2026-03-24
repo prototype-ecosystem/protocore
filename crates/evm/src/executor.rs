@@ -17,9 +17,9 @@ use tracing::{debug, info, trace, warn};
 
 use crate::{
     gas::{BaseFeeCalculator, GasConfig},
-    precompiles::PrecompileRegistry,
+    precompiles::{staking::StakingPrecompile, PrecompileRegistry},
     state_adapter::{StateAdapter, StateRootProvider},
-    BLOCKS_PER_EPOCH, DEFAULT_BLOCK_GAS_LIMIT, MAINNET_CHAIN_ID,
+    BLOCKS_PER_EPOCH, DEFAULT_BLOCK_GAS_LIMIT, DEFAULT_BLOCK_REWARD, MAINNET_CHAIN_ID,
 };
 
 /// Errors that can occur during EVM execution
@@ -241,6 +241,25 @@ pub struct BlockContext {
     pub base_fee: u128,
     /// Previous block's RANDAO mix (for PREVRANDAO opcode)
     pub prev_randao: B256,
+}
+
+/// Active validator info extracted from staking state for consensus layer consumption.
+///
+/// This is the bridge between EVM staking state and the consensus engine's
+/// `ValidatorSet`. At epoch boundaries, the consensus layer reads this
+/// to build the next epoch's validator set.
+#[derive(Debug, Clone)]
+pub struct ActiveValidator {
+    /// Validator's EVM address
+    pub address: AlloyAddress,
+    /// BLS public key bytes (48 bytes)
+    pub pubkey: Vec<u8>,
+    /// Total stake (self + delegated)
+    pub total_stake: u128,
+    /// Validator's own stake
+    pub self_stake: u128,
+    /// Commission rate in basis points
+    pub commission: u16,
 }
 
 /// Transaction data for execution
@@ -699,13 +718,212 @@ where
     }
 
     /// Process end-of-epoch operations
-    fn process_epoch_end(&mut self, _block_number: u64) -> Result<(), ExecutionError> {
-        debug!("Processing epoch end");
-        // Epoch-specific operations:
-        // - Reward distribution
-        // - Validator set rotation
-        // - Unbonding completion
+    ///
+    /// Called every `BLOCKS_PER_EPOCH` blocks. Performs:
+    /// 1. Block reward distribution — proportional to each validator's stake
+    /// 2. Unbonding completion — releases matured unbonding delegations (TODO)
+    /// 3. Epoch counter increment in staking state
+    ///
+    /// All state mutations happen through the same `StateAdapter` used for
+    /// transaction execution, ensuring deterministic state transitions that
+    /// all validators will agree on.
+    fn process_epoch_end(&mut self, block_number: u64) -> Result<(), ExecutionError> {
+        let epoch = block_number / BLOCKS_PER_EPOCH;
+        info!(
+            block_number = block_number,
+            epoch = epoch,
+            "Processing epoch end"
+        );
+
+        // Load the current staking state from the precompile's storage
+        let mut staking_state = StakingPrecompile::load_state(&mut self.db)
+            .map_err(|e| ExecutionError::StateError(format!("failed to load staking state: {}", e)))?;
+
+        // ---------------------------------------------------------------
+        // 1. Block Reward Distribution
+        // ---------------------------------------------------------------
+        // Total rewards for this epoch = block_reward * blocks_per_epoch
+        let total_epoch_reward = DEFAULT_BLOCK_REWARD
+            .checked_mul(BLOCKS_PER_EPOCH as u128)
+            .unwrap_or(DEFAULT_BLOCK_REWARD * BLOCKS_PER_EPOCH as u128);
+
+        // Collect active, non-jailed validators and their stakes
+        let active_validators: Vec<(AlloyAddress, u128)> = staking_state
+            .validators
+            .iter()
+            .filter(|(_, v)| v.active && !v.jailed)
+            .map(|(addr, v)| (*addr, v.total_stake))
+            .collect();
+
+        let active_count = active_validators.len();
+        if active_count == 0 {
+            warn!("No active validators at epoch end — skipping reward distribution");
+        } else {
+            let total_active_stake: u128 = active_validators.iter().map(|(_, s)| *s).sum();
+
+            if total_active_stake == 0 {
+                // Equal split if somehow all active validators have zero stake
+                let per_validator = total_epoch_reward / active_count as u128;
+                for (addr, _) in &active_validators {
+                    self.db
+                        .add_balance(*addr, U256::from(per_validator))
+                        .map_err(|e| {
+                            ExecutionError::StateError(format!(
+                                "failed to credit reward to {}: {:?}",
+                                addr, e
+                            ))
+                        })?;
+                }
+                info!(
+                    epoch = epoch,
+                    validators = active_count,
+                    per_validator_reward = per_validator,
+                    "Distributed epoch rewards equally (zero total stake)"
+                );
+            } else {
+                // Proportional distribution based on stake
+                let mut distributed = 0u128;
+                for (i, (addr, stake)) in active_validators.iter().enumerate() {
+                    // For the last validator, give the remainder to avoid rounding dust
+                    let reward = if i == active_count - 1 {
+                        total_epoch_reward - distributed
+                    } else {
+                        // reward_i = total_reward * stake_i / total_stake
+                        (total_epoch_reward as u128)
+                            .checked_mul(*stake)
+                            .unwrap_or(u128::MAX)
+                            / total_active_stake
+                    };
+
+                    self.db
+                        .add_balance(*addr, U256::from(reward))
+                        .map_err(|e| {
+                            ExecutionError::StateError(format!(
+                                "failed to credit reward to {}: {:?}",
+                                addr, e
+                            ))
+                        })?;
+
+                    distributed += reward;
+
+                    debug!(
+                        validator = %addr,
+                        stake = *stake,
+                        reward = reward,
+                        "Credited epoch reward"
+                    );
+                }
+
+                info!(
+                    epoch = epoch,
+                    validators = active_count,
+                    total_reward = total_epoch_reward,
+                    total_distributed = distributed,
+                    "Distributed epoch rewards proportionally"
+                );
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // 2. Unbonding Completion
+        // ---------------------------------------------------------------
+        // Check for matured unbonding entries and release tokens
+        let mut completed_unbonds: Vec<(AlloyAddress, u128)> = Vec::new();
+        for (delegator, entries) in &mut staking_state.unbonding {
+            let mut remaining = Vec::new();
+            for entry in entries.drain(..) {
+                if entry.unlock_height <= block_number {
+                    // This unbonding has matured — release tokens
+                    completed_unbonds.push((*delegator, entry.amount));
+                    debug!(
+                        delegator = %delegator,
+                        validator = %entry.validator,
+                        amount = entry.amount,
+                        "Unbonding matured"
+                    );
+                } else {
+                    remaining.push(entry);
+                }
+            }
+            *entries = remaining;
+        }
+
+        // Remove empty unbonding entries
+        staking_state.unbonding.retain(|_, v| !v.is_empty());
+
+        // Credit matured unbonding amounts back to delegators
+        for (delegator, amount) in &completed_unbonds {
+            self.db
+                .add_balance(*delegator, U256::from(*amount))
+                .map_err(|e| {
+                    ExecutionError::StateError(format!(
+                        "failed to release unbonded tokens to {}: {:?}",
+                        delegator, e
+                    ))
+                })?;
+        }
+
+        if !completed_unbonds.is_empty() {
+            info!(
+                epoch = epoch,
+                unbonds_completed = completed_unbonds.len(),
+                total_released = completed_unbonds.iter().map(|(_, a)| *a).sum::<u128>(),
+                "Completed unbonding delegations"
+            );
+        }
+
+        // ---------------------------------------------------------------
+        // 3. Advance Epoch Counter
+        // ---------------------------------------------------------------
+        staking_state.current_epoch = epoch + 1;
+
+        // Persist the updated staking state
+        StakingPrecompile::save_state(&mut self.db, &staking_state)
+            .map_err(|e| ExecutionError::StateError(format!("failed to save staking state: {}", e)))?;
+
+        info!(
+            epoch = epoch,
+            next_epoch = staking_state.current_epoch,
+            "Epoch processing complete"
+        );
+
         Ok(())
+    }
+
+    /// Read the current active validator set from staking state.
+    ///
+    /// Returns a list of (address, pubkey, total_stake, commission) for all
+    /// active, non-jailed validators, sorted by total stake descending.
+    ///
+    /// This is used by the consensus layer to update the validator set
+    /// at epoch boundaries.
+    pub fn get_active_validator_set(
+        &mut self,
+    ) -> Result<Vec<ActiveValidator>, ExecutionError> {
+        let staking_state = StakingPrecompile::load_state(&mut self.db)
+            .map_err(|e| ExecutionError::StateError(format!("failed to load staking state: {}", e)))?;
+
+        let mut validators: Vec<ActiveValidator> = staking_state
+            .validators
+            .iter()
+            .filter(|(_, v)| v.active && !v.jailed)
+            .map(|(addr, v)| ActiveValidator {
+                address: *addr,
+                pubkey: v.pubkey.clone(),
+                total_stake: v.total_stake,
+                self_stake: v.self_stake,
+                commission: v.commission,
+            })
+            .collect();
+
+        // Sort by total stake descending (deterministic tiebreak by address)
+        validators.sort_by(|a, b| {
+            b.total_stake
+                .cmp(&a.total_stake)
+                .then_with(|| a.address.cmp(&b.address))
+        });
+
+        Ok(validators)
     }
 
     /// Compute logs bloom filter for logs

@@ -44,8 +44,8 @@ mod state_adapter;
 
 // Re-export main types at crate root
 pub use executor::{
-    BlockContext, BlockExecutionResult, EvmConfig, EvmExecutor, ExecutionError, Log, Receipt,
-    TransactionData, TransactionResult,
+    ActiveValidator, BlockContext, BlockExecutionResult, EvmConfig, EvmExecutor, ExecutionError,
+    Log, Receipt, TransactionData, TransactionResult,
 };
 pub use gas::{BaseFeeCalculator, GasConfig, GasCosts};
 pub use precompiles::{
@@ -71,6 +71,9 @@ pub const DEFAULT_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 
 /// Number of blocks per epoch
 pub const BLOCKS_PER_EPOCH: u64 = 43200; // ~24 hours at 2s blocks
+
+/// Default block reward in wei (2 PCR per block)
+pub const DEFAULT_BLOCK_REWARD: u128 = 2_000_000_000_000_000_000;
 
 #[cfg(test)]
 mod tests {
