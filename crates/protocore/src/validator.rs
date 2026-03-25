@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use alloy_primitives::{Address as AlloyAddress, Bytes, U256, B256};
 use protocore_config::Config;
@@ -25,7 +25,7 @@ use protocore_consensus::{
 use protocore_crypto::{BlsPrivateKey, BlsPublicKey, BlsSignature};
 use protocore_evm::{BlockContext, EvmConfig, EvmExecutor, StateRootProvider, TransactionData, BLOCKS_PER_EPOCH};
 use protocore_p2p::GossipMessage;
-use protocore_storage::StateDB;
+use protocore_storage::{Database as StorageDatabase, StateDB};
 use protocore_types::{Address, Block};
 use revm::primitives::{AccountInfo, HashMap as RevmHashMap};
 use std::collections::HashMap;
@@ -35,15 +35,17 @@ use crate::metrics;
 /// Database wrapper for EVM execution that reads from StateDB and tracks writes
 struct ExecutionDb {
     state_db: Arc<StateDB>,
+    database: Arc<StorageDatabase>,
     accounts: HashMap<AlloyAddress, AccountInfo>,
     storage_writes: HashMap<AlloyAddress, HashMap<U256, U256>>,
     code: HashMap<B256, revm::primitives::Bytecode>,
 }
 
 impl ExecutionDb {
-    fn new(state_db: Arc<StateDB>) -> Self {
+    fn new(state_db: Arc<StateDB>, database: Arc<StorageDatabase>) -> Self {
         Self {
             state_db,
+            database,
             accounts: HashMap::new(),
             storage_writes: HashMap::new(),
             code: HashMap::new(),
@@ -83,7 +85,7 @@ impl revm::Database for ExecutionDb {
     fn basic(&mut self, address: AlloyAddress) -> Result<Option<AccountInfo>, Self::Error> {
         // Check cached accounts first
         if let Some(account) = self.accounts.get(&address) {
-            info!(
+            trace!(
                 address = %address,
                 code_hash = %account.code_hash,
                 "ExecutionDb::basic - returning cached account"
@@ -109,7 +111,7 @@ impl revm::Database for ExecutionDb {
                 None
             };
 
-            info!(
+            trace!(
                 address = %address,
                 code_hash = %code_hash,
                 nonce = account.nonce,
@@ -123,7 +125,7 @@ impl revm::Database for ExecutionDb {
                 code,
             }))
         } else {
-            info!(
+            trace!(
                 address = %address,
                 "ExecutionDb::basic - account not found"
             );
@@ -134,7 +136,7 @@ impl revm::Database for ExecutionDb {
     fn code_by_hash(&mut self, code_hash: B256) -> Result<revm::primitives::Bytecode, Self::Error> {
         // Check local cache first
         if let Some(code) = self.code.get(&code_hash) {
-            info!(
+            trace!(
                 code_hash = %code_hash,
                 code_len = code.len(),
                 "ExecutionDb::code_by_hash - returning cached code"
@@ -144,7 +146,7 @@ impl revm::Database for ExecutionDb {
 
         // Fall back to state_db
         if let Some(code) = self.state_db.get_code(&code_hash.0) {
-            info!(
+            trace!(
                 code_hash = %code_hash,
                 code_len = code.len(),
                 "ExecutionDb::code_by_hash - loading from StateDB"
@@ -159,7 +161,7 @@ impl revm::Database for ExecutionDb {
         // Check writes cache first
         if let Some(account_storage) = self.storage_writes.get(&address) {
             if let Some(value) = account_storage.get(&index) {
-                info!(
+                trace!(
                     address = %address,
                     slot = %index,
                     value = %value,
@@ -174,7 +176,7 @@ impl revm::Database for ExecutionDb {
         let slot_bytes: [u8; 32] = index.to_be_bytes();
         let value = self.state_db.get_storage(&addr_bytes, &slot_bytes);
         let result = U256::from_be_bytes(value);
-        info!(
+        trace!(
             address = %address,
             slot = %index,
             value = %result,
@@ -183,7 +185,14 @@ impl revm::Database for ExecutionDb {
         Ok(result)
     }
 
-    fn block_hash(&mut self, _number: u64) -> Result<B256, Self::Error> {
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        // Look up the block hash from metadata storage (written as block_hash_{height})
+        let height_key = format!("block_hash_{}", number);
+        if let Ok(Some(hash_bytes)) = self.database.get_metadata(height_key.as_bytes()) {
+            if hash_bytes.len() >= 32 {
+                return Ok(B256::from_slice(&hash_bytes[..32]));
+            }
+        }
         Ok(B256::ZERO)
     }
 }
@@ -654,6 +663,11 @@ impl ValidatorNode {
                     let mut tx_hashes = Vec::with_capacity(tx_count);
                     let chain_id = config_chain_id;
 
+                    // Track per-transaction EVM results for receipts
+                    // Maps tx_index -> (success: bool, gas_used: u64, logs: Vec<(address, topics, data)>)
+                    let mut tx_evm_results: HashMap<usize, (bool, u64, Vec<(AlloyAddress, Vec<B256>, Bytes)>)> = HashMap::new();
+                    let mut tx_index_counter: usize = 0;
+
                     for tx in &committed.block.transactions {
                         // Get sender address
                         let sender = match tx.sender() {
@@ -666,6 +680,8 @@ impl ValidatorNode {
 
                         // Collect transaction hash for mempool removal
                         tx_hashes.push(tx.hash());
+                        let current_tx_index = tx_index_counter;
+                        tx_index_counter += 1;
 
                         // Check if this transaction has contract data (call or deployment)
                         let has_data = !tx.data().is_empty();
@@ -682,7 +698,7 @@ impl ValidatorNode {
                             );
 
                             // Create ExecutionDb that reads from StateDB and tracks writes
-                            let mut exec_db = ExecutionDb::new(Arc::clone(&state_db));
+                            let mut exec_db = ExecutionDb::new(Arc::clone(&state_db), Arc::clone(&database));
 
                             let from_alloy = AlloyAddress::from_slice(sender.as_fixed_bytes());
                             let sender_balance = state_db.get_balance(sender.as_fixed_bytes());
@@ -776,34 +792,34 @@ impl ValidatorNode {
                                         "EVM transaction executed"
                                     );
 
+                                    // Store EVM result for receipt construction
+                                    let evm_logs: Vec<(AlloyAddress, Vec<B256>, Bytes)> = result.logs.iter().map(|log| {
+                                        (log.address, log.topics.clone(), log.data.clone())
+                                    }).collect();
+                                    tx_evm_results.insert(current_tx_index, (result.success, result.gas_used, evm_logs));
+
                                     // Apply state changes to StateDB
                                     // First, update sender nonce
                                     state_db.increment_nonce(sender.as_fixed_bytes());
 
-                                    // Deduct gas cost from sender
-                                    let gas_cost = (result.gas_used as u128) * (tx.max_fee_per_gas() as u128);
+                                    // Calculate effective gas price (EIP-1559):
+                                    // effective_gas_price = min(max_fee_per_gas, base_fee + max_priority_fee_per_gas)
+                                    let base_fee = block_context.base_fee;
+                                    let effective_gas_price = std::cmp::min(
+                                        tx.max_fee_per_gas() as u128,
+                                        base_fee + (tx.max_priority_fee_per_gas() as u128),
+                                    );
+
+                                    // Deduct gas cost from sender using effective gas price
+                                    // (revm does NOT deduct gas from the sender — the host is expected to do it)
+                                    let gas_cost = (result.gas_used as u128) * effective_gas_price;
                                     if let Err(e) = state_db.sub_balance(sender.as_fixed_bytes(), gas_cost) {
                                         error!(error = %e, "Failed to deduct gas cost");
                                     }
 
-                                    // Handle value transfer
-                                    if tx.value() > 0 {
-                                        if let Some(to) = tx.to() {
-                                            if let Err(e) = state_db.transfer(
-                                                sender.as_fixed_bytes(),
-                                                to.as_fixed_bytes(),
-                                                tx.value(),
-                                            ) {
-                                                error!(error = %e, "Failed to transfer value");
-                                            }
-                                        } else if is_contract_creation {
-                                            // For contract creation, deduct value from sender
-                                            // (it goes to the new contract)
-                                            if let Err(e) = state_db.sub_balance(sender.as_fixed_bytes(), tx.value()) {
-                                                error!(error = %e, "Failed to deduct contract creation value");
-                                            }
-                                        }
-                                    }
+                                    // NOTE: Do NOT manually transfer tx value here.
+                                    // The EVM already handles value transfers internally during execution.
+                                    // Doing it again would result in a double transfer.
 
                                     // If this was a contract creation, store the contract code
                                     if is_contract_creation && result.success {
@@ -849,7 +865,7 @@ impl ValidatorNode {
                                     let db = executor.db();
                                     let changes = db.pending_changes();
 
-                                    info!(
+                                    trace!(
                                         tx_hash = %hex::encode(&tx.hash().as_bytes()[..8]),
                                         changes_count = changes.len(),
                                         "Applying EVM storage changes"
@@ -858,7 +874,7 @@ impl ValidatorNode {
                                     for (address, account_changes) in changes {
                                         let addr_bytes: [u8; 20] = address.0.into();
 
-                                        info!(
+                                        trace!(
                                             address = %hex::encode(&addr_bytes),
                                             storage_changes = account_changes.storage.len(),
                                             "Processing account changes"
@@ -869,7 +885,7 @@ impl ValidatorNode {
                                             let slot_bytes: [u8; 32] = slot.to_be_bytes();
                                             let value_bytes: [u8; 32] = value.to_be_bytes();
                                             state_db.set_storage(&addr_bytes, &slot_bytes, value_bytes);
-                                            info!(
+                                            trace!(
                                                 address = %hex::encode(&addr_bytes),
                                                 slot = %hex::encode(&slot_bytes),
                                                 value = %hex::encode(&value_bytes),
@@ -886,11 +902,15 @@ impl ValidatorNode {
                                     );
                                     // Still increment nonce for failed transactions
                                     state_db.increment_nonce(sender.as_fixed_bytes());
+                                    // Record as failed with gas limit consumed
+                                    tx_evm_results.insert(current_tx_index, (false, tx.gas_limit() as u64, vec![]));
                                 }
                             }
                         } else {
                             // Simple value transfer (no contract interaction)
                             state_db.increment_nonce(sender.as_fixed_bytes());
+                            // Record simple transfer result (always succeeds if we reach here, uses 21000 gas)
+                            tx_evm_results.insert(current_tx_index, (true, 21000, vec![]));
 
                             // Transfer value from sender to recipient (if any)
                             let value = tx.value();
@@ -951,14 +971,38 @@ impl ValidatorNode {
                             error!(error = %e, tx_hash = %hex::encode(&tx_hash.as_bytes()[..8]), "Failed to store transaction");
                         }
 
-                        // Create receipt data: tx_hash(32) + block_hash(32) + block_height(8) + tx_index(8) + status(1) + gas_used(8)
+                        // Look up actual EVM execution result for this transaction
+                        let (tx_status, tx_gas_used, tx_logs) = tx_evm_results
+                            .get(&tx_index)
+                            .cloned()
+                            .unwrap_or((true, 21000, vec![]));
+
+                        // Create receipt data: tx_hash(32) + block_hash(32) + block_height(8) + tx_index(8) + status(1) + gas_used(8) + logs_json
                         let mut receipt_data = Vec::with_capacity(89);
                         receipt_data.extend_from_slice(tx_hash.as_bytes());
                         receipt_data.extend_from_slice(hash.as_bytes());
                         receipt_data.extend_from_slice(&height.to_le_bytes());
                         receipt_data.extend_from_slice(&(tx_index as u64).to_le_bytes());
-                        receipt_data.push(1u8); // success status
-                        receipt_data.extend_from_slice(&21000u64.to_le_bytes()); // gas_used placeholder
+                        receipt_data.push(if tx_status { 1u8 } else { 0u8 }); // actual status from EVM
+                        receipt_data.extend_from_slice(&tx_gas_used.to_le_bytes()); // actual gas used from EVM
+
+                        // Append serialized logs after the fixed 89-byte header
+                        // Format: log_count(4) + for each log: addr(20) + topic_count(4) + topics(32 each) + data_len(4) + data
+                        {
+                            let log_count = tx_logs.len() as u32;
+                            receipt_data.extend_from_slice(&log_count.to_le_bytes());
+                            for (addr, topics, data) in &tx_logs {
+                                receipt_data.extend_from_slice(addr.as_slice());
+                                let topic_count = topics.len() as u32;
+                                receipt_data.extend_from_slice(&topic_count.to_le_bytes());
+                                for topic in topics {
+                                    receipt_data.extend_from_slice(topic.as_slice());
+                                }
+                                let data_len = data.len() as u32;
+                                receipt_data.extend_from_slice(&data_len.to_le_bytes());
+                                receipt_data.extend_from_slice(data);
+                            }
+                        }
 
                         if let Err(e) = database.put_receipt(tx_hash.as_bytes(), &receipt_data) {
                             error!(error = %e, tx_hash = %hex::encode(&tx_hash.as_bytes()[..8]), "Failed to store receipt");
@@ -1006,7 +1050,7 @@ impl ValidatorNode {
                         // process_epoch_end is called inside execute_block's process_end_of_block,
                         // but since we execute transactions individually above (not via execute_block),
                         // we need to trigger epoch processing explicitly here.
-                        let exec_db = ExecutionDb::new(Arc::clone(&state_db));
+                        let exec_db = ExecutionDb::new(Arc::clone(&state_db), Arc::clone(&database));
                         let evm_config = EvmConfig {
                             chain_id: config_chain_id,
                             ..EvmConfig::default()

@@ -575,6 +575,58 @@ impl StateProvider for RpcStateAdapter {
             None
         };
 
+        // Parse logs from receipt data (appended after the 89-byte fixed header)
+        let mut logs = vec![];
+        if receipt_data.len() > 89 {
+            let mut offset = 89;
+            // Read log_count (4 bytes, little-endian)
+            if offset + 4 <= receipt_data.len() {
+                let log_count = u32::from_le_bytes(receipt_data[offset..offset + 4].try_into().unwrap_or([0; 4])) as usize;
+                offset += 4;
+                let mut global_log_index = 0u64;
+                for _ in 0..log_count {
+                    // addr(20)
+                    if offset + 20 > receipt_data.len() { break; }
+                    let mut addr = [0u8; 20];
+                    addr.copy_from_slice(&receipt_data[offset..offset + 20]);
+                    offset += 20;
+                    // topic_count(4)
+                    if offset + 4 > receipt_data.len() { break; }
+                    let topic_count = u32::from_le_bytes(receipt_data[offset..offset + 4].try_into().unwrap_or([0; 4])) as usize;
+                    offset += 4;
+                    // topics(32 each)
+                    let mut topics = Vec::with_capacity(topic_count);
+                    for _ in 0..topic_count {
+                        if offset + 32 > receipt_data.len() { break; }
+                        let mut topic = [0u8; 32];
+                        topic.copy_from_slice(&receipt_data[offset..offset + 32]);
+                        topics.push(protocore_rpc::H256(topic));
+                        offset += 32;
+                    }
+                    // data_len(4) + data
+                    if offset + 4 > receipt_data.len() { break; }
+                    let data_len = u32::from_le_bytes(receipt_data[offset..offset + 4].try_into().unwrap_or([0; 4])) as usize;
+                    offset += 4;
+                    if offset + data_len > receipt_data.len() { break; }
+                    let data = receipt_data[offset..offset + data_len].to_vec();
+                    offset += data_len;
+
+                    logs.push(RpcLog {
+                        address: protocore_rpc::Address(addr),
+                        topics,
+                        data: HexBytes(data),
+                        block_number: HexU64(block_height),
+                        transaction_hash: protocore_rpc::H256(tx_hash),
+                        transaction_index: HexU64(tx_index),
+                        block_hash: protocore_rpc::H256(block_hash),
+                        log_index: HexU64(global_log_index),
+                        removed: false,
+                    });
+                    global_log_index += 1;
+                }
+            }
+        }
+
         Ok(Some(RpcReceipt {
             transaction_hash: protocore_rpc::H256(tx_hash),
             transaction_index: HexU64(tx_index),
@@ -585,10 +637,10 @@ impl StateProvider for RpcStateAdapter {
             cumulative_gas_used: HexU64(cumulative_gas_used),
             gas_used: HexU64(gas_used),
             contract_address,
-            logs: vec![],           // TODO: Populate from EVM execution
+            logs,
             logs_bloom: HexBytes(vec![0u8; 256]),
             status: HexU64(status as u64),
-            effective_gas_price: HexU64(1_000_000_000), // 1 gwei placeholder
+            effective_gas_price: HexU64(1_000_000_000), // TODO: store effective_gas_price in receipt
             tx_type: HexU64(2),                         // EIP-1559
         }))
     }
