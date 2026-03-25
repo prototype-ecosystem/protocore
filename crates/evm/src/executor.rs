@@ -747,13 +747,16 @@ where
             .checked_mul(BLOCKS_PER_EPOCH as u128)
             .unwrap_or(DEFAULT_BLOCK_REWARD * BLOCKS_PER_EPOCH as u128);
 
-        // Collect active, non-jailed validators and their stakes
-        let active_validators: Vec<(AlloyAddress, u128)> = staking_state
+        // Collect active, non-jailed validators and their stakes.
+        // Sort by address for deterministic iteration order across all validators
+        // (HashMap iteration order is non-deterministic).
+        let mut active_validators: Vec<(AlloyAddress, u128)> = staking_state
             .validators
             .iter()
             .filter(|(_, v)| v.active && !v.jailed)
             .map(|(addr, v)| (*addr, v.total_stake))
             .collect();
+        active_validators.sort_by_key(|(addr, _)| *addr);
 
         let active_count = active_validators.len();
         if active_count == 0 {
@@ -850,6 +853,9 @@ where
 
         // Remove empty unbonding entries
         staking_state.unbonding.retain(|_, v| !v.is_empty());
+
+        // Sort for deterministic credit order across all validators
+        completed_unbonds.sort_by_key(|(addr, _)| *addr);
 
         // Credit matured unbonding amounts back to delegators
         for (delegator, amount) in &completed_unbonds {

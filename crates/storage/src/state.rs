@@ -10,7 +10,12 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
+
+/// Maximum number of entries in the account cache before eviction.
+const MAX_ACCOUNT_CACHE_SIZE: usize = 10_000;
+/// Maximum number of entries in the storage cache before eviction.
+const MAX_STORAGE_CACHE_SIZE: usize = 100_000;
 
 use crate::db::{cf, Database, WriteBatch};
 use crate::trie::MerkleTrie;
@@ -177,10 +182,14 @@ pub struct StateDB {
 }
 
 impl StateDB {
-    /// Create a new StateDB with an existing database
+    /// Create a new StateDB with an existing database.
+    ///
+    /// The state trie is backed by RocksDB via the `trie_nodes` column family,
+    /// so trie nodes survive restarts. The in-memory BTreeMap inside the trie
+    /// acts as a write-through cache.
     pub fn new(db: Arc<Database>) -> Self {
         let root = Self::load_state_root(&db).unwrap_or(EMPTY_ROOT);
-        let state_trie = MerkleTrie::new();
+        let state_trie = MerkleTrie::with_db(Arc::clone(&db));
 
         Self {
             db,
@@ -583,9 +592,41 @@ impl StateDB {
             diff.new_root = new_root;
         }
 
+        // Evict storage tries for accounts that were not dirty in this commit.
+        // Dirty accounts' tries are kept hot; the rest can be reloaded on demand.
+        {
+            let dirty_set: HashSet<Address> = dirty_accounts.iter().copied().collect();
+            self.storage_tries
+                .write()
+                .retain(|addr, _| dirty_set.contains(addr));
+        }
+
         // Clear dirty sets
         self.dirty_accounts.write().clear();
         self.dirty_storage.write().clear();
+
+        // Cache eviction: flush entire cache when it exceeds the size limit.
+        // Entries will be re-loaded from RocksDB on next access.
+        {
+            let account_cache_len = self.account_cache.read().len();
+            if account_cache_len > MAX_ACCOUNT_CACHE_SIZE {
+                info!(
+                    "Account cache size {} exceeds limit {}, clearing",
+                    account_cache_len, MAX_ACCOUNT_CACHE_SIZE
+                );
+                self.account_cache.write().clear();
+            }
+        }
+        {
+            let storage_cache_len = self.storage_cache.read().len();
+            if storage_cache_len > MAX_STORAGE_CACHE_SIZE {
+                info!(
+                    "Storage cache size {} exceeds limit {}, clearing",
+                    storage_cache_len, MAX_STORAGE_CACHE_SIZE
+                );
+                self.storage_cache.write().clear();
+            }
+        }
 
         debug!("Committed state, new root: {:?}", new_root);
         Ok(new_root)

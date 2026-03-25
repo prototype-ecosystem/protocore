@@ -9,7 +9,9 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tracing::trace;
 
+use crate::db::Database;
 use crate::{keccak256, Hash, Result, StorageError, EMPTY_ROOT};
 
 /// Nibble representation for trie paths
@@ -344,18 +346,34 @@ impl MerkleProof {
 
 /// Merkle Patricia Trie
 pub struct MerkleTrie {
-    /// Node storage (hash -> node)
+    /// Node storage (hash -> node) — write-through cache
     nodes: Arc<RwLock<BTreeMap<Hash, TrieNode>>>,
     /// Current root hash
     root: RwLock<Hash>,
+    /// Optional database for persistence (write-through to RocksDB)
+    db: Option<Arc<Database>>,
 }
 
 impl MerkleTrie {
-    /// Create a new empty trie
+    /// Create a new empty trie (in-memory only, no persistence)
     pub fn new() -> Self {
         Self {
             nodes: Arc::new(RwLock::new(BTreeMap::new())),
             root: RwLock::new(EMPTY_ROOT),
+            db: None,
+        }
+    }
+
+    /// Create a new trie backed by RocksDB for persistence.
+    ///
+    /// Nodes are written through to both the in-memory BTreeMap cache and
+    /// the `trie_nodes` column family in RocksDB. On cache miss during reads,
+    /// the trie falls back to loading from RocksDB.
+    pub fn with_db(db: Arc<Database>) -> Self {
+        Self {
+            nodes: Arc::new(RwLock::new(BTreeMap::new())),
+            root: RwLock::new(EMPTY_ROOT),
+            db: Some(db),
         }
     }
 
@@ -364,6 +382,7 @@ impl MerkleTrie {
         Self {
             nodes: Arc::new(RwLock::new(nodes)),
             root: RwLock::new(root),
+            db: None,
         }
     }
 
@@ -792,20 +811,49 @@ impl MerkleTrie {
         }
     }
 
-    /// Store a node and return its hash
+    /// Store a node and return its hash.
+    ///
+    /// Writes to both the in-memory cache and RocksDB (if a database is attached).
     fn store_node(&self, node: TrieNode) -> Result<Hash> {
         let hash = node.hash();
+
+        // Write through to RocksDB if available
+        if let Some(ref db) = self.db {
+            let encoded = node.encode();
+            db.put_trie_node(&hash, &encoded)?;
+            trace!("Persisted trie node {:?} ({} bytes)", hash, encoded.len());
+        }
+
+        // Always store in the in-memory cache
         self.nodes.write().insert(hash, node);
         Ok(hash)
     }
 
-    /// Get a node by hash
+    /// Get a node by hash.
+    ///
+    /// Checks the in-memory cache first, then falls back to RocksDB.
+    /// On a RocksDB hit, the node is promoted back into the cache.
     fn get_node(&self, hash: &Hash) -> Result<TrieNode> {
-        self.nodes
-            .read()
-            .get(hash)
-            .cloned()
-            .ok_or_else(|| StorageError::NotFound(format!("Node not found: {:?}", hash)))
+        // Fast path: check in-memory cache
+        if let Some(node) = self.nodes.read().get(hash).cloned() {
+            return Ok(node);
+        }
+
+        // Slow path: try loading from RocksDB
+        if let Some(ref db) = self.db {
+            if let Some(data) = db.get_trie_node(hash)? {
+                let node = TrieNode::decode(&data)?;
+                // Promote back into the in-memory cache
+                self.nodes.write().insert(*hash, node.clone());
+                trace!("Loaded trie node {:?} from RocksDB", hash);
+                return Ok(node);
+            }
+        }
+
+        Err(StorageError::NotFound(format!(
+            "Trie node not found: {:?}",
+            hash
+        )))
     }
 
     /// Check if the trie is empty
@@ -836,6 +884,7 @@ impl Clone for MerkleTrie {
         Self {
             nodes: Arc::new(RwLock::new(self.nodes.read().clone())),
             root: RwLock::new(*self.root.read()),
+            db: self.db.clone(),
         }
     }
 }

@@ -739,6 +739,13 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
                 );
                 return;
             }
+        } else {
+            warn!(
+                height = height,
+                round = round,
+                "WAL is not enabled — anti-equivocation check skipped for prevote. \
+                 Validators MUST run with WAL to prevent signing conflicting messages after crash."
+            );
         }
 
         // Record vote in state machine
@@ -993,6 +1000,13 @@ impl<V: BlockValidator, B: BlockBuilder> ConsensusEngine<V, B> {
                 );
                 return;
             }
+        } else {
+            warn!(
+                height = height,
+                round = round,
+                "WAL is not enabled — anti-equivocation check skipped for precommit. \
+                 Validators MUST run with WAL to prevent signing conflicting messages after crash."
+            );
         }
 
         // Record this precommit vote in state machine

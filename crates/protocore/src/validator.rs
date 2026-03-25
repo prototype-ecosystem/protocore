@@ -21,6 +21,7 @@ use protocore_config::Config;
 use protocore_consensus::{
     ChainContext, CommittedBlock, ConsensusEngine, ConsensusMessage, TimeoutConfig, TimeoutInfo,
     Validator as ConsensusValidator, ValidatorSet as ConsensusValidatorSet, Vote, VoteType,
+    WalConfig,
 };
 use protocore_crypto::{BlsPrivateKey, BlsPublicKey, BlsSignature};
 use protocore_evm::{BlockContext, EvmConfig, EvmExecutor, StateRootProvider, TransactionData, BLOCKS_PER_EPOCH};
@@ -536,8 +537,17 @@ impl ValidatorNode {
         // Build chain context from config for replay-safe consensus signing
         let chain_context = ChainContext::new(self.config.chain.chain_id, [0u8; 32]);
 
-        // Create the consensus engine with chain context
-        let engine = ConsensusEngine::new(
+        // WAL is mandatory for validators — without it, anti-equivocation
+        // breaks (a validator could sign conflicting messages after a crash).
+        let wal_dir = std::path::PathBuf::from(&self.config.storage.data_dir)
+            .join("consensus-wal");
+        let wal_config = WalConfig {
+            dir: wal_dir,
+            ..WalConfig::default()
+        };
+
+        // Create the consensus engine with WAL enabled (fatal on failure)
+        let engine = ConsensusEngine::with_wal(
             self.validator_id.unwrap(),
             self.keys.bls_private_key.clone(),
             validator_set,
@@ -547,11 +557,13 @@ impl ValidatorNode {
             network_tx,
             commit_tx,
             timeout_tx,
+            wal_config,
             chain_context,
-        );
+        )
+        .context("WAL is mandatory for validator nodes — failed to initialize")?;
 
         self.consensus = Some(Arc::new(engine));
-        info!("Consensus engine initialized");
+        info!("Consensus engine initialized with WAL enabled");
 
         Ok(())
     }

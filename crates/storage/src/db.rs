@@ -29,9 +29,11 @@ pub mod cf {
     pub const CONSENSUS: &str = "consensus";
     /// Metadata column family - stores chain metadata (heights, hashes, config)
     pub const METADATA: &str = "metadata";
+    /// Trie nodes column family - stores Merkle Patricia Trie nodes
+    pub const TRIE_NODES: &str = "trie_nodes";
 
     /// All column families
-    pub const ALL: &[&str] = &[BLOCKS, TRANSACTIONS, STATE, RECEIPTS, CONSENSUS, METADATA];
+    pub const ALL: &[&str] = &[BLOCKS, TRANSACTIONS, STATE, RECEIPTS, CONSENSUS, METADATA, TRIE_NODES];
 }
 
 /// Database configuration
@@ -405,5 +407,15 @@ impl Database {
     /// Get metadata
     pub fn get_metadata(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         self.get(cf::METADATA, key)
+    }
+
+    /// Store a trie node
+    pub fn put_trie_node(&self, hash: &[u8], data: &[u8]) -> Result<()> {
+        self.put(cf::TRIE_NODES, hash, data)
+    }
+
+    /// Get a trie node by hash
+    pub fn get_trie_node(&self, hash: &[u8]) -> Result<Option<Vec<u8>>> {
+        self.get(cf::TRIE_NODES, hash)
     }
 }

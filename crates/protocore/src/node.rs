@@ -2130,6 +2130,8 @@ impl Node {
                         );
 
                         let mut last_applied_height = 0u64;
+                        // Track the hash of the last applied block for parent-hash chaining
+                        let mut prev_block_hash: Option<H256> = None;
 
                         for sync_block in &blocks {
                             // Verify this is the next expected block
@@ -2158,6 +2160,58 @@ impl Node {
                                     break;
                                 }
                             };
+
+                            // Validate block height matches the SyncBlock envelope
+                            if block.header.height != sync_block.height {
+                                error!(
+                                    expected = sync_block.height,
+                                    got = block.header.height,
+                                    "Synced block header height doesn't match envelope — skipping"
+                                );
+                                break;
+                            }
+
+                            // Validate parent hash chains correctly
+                            let expected_parent = if let Some(ref ph) = prev_block_hash {
+                                // We already have the previous block's hash from this batch
+                                *ph
+                            } else if sync_block.height > 0 {
+                                // Look up the parent block hash from our database
+                                let parent_height = sync_block.height - 1;
+                                let height_key = format!("block_hash_{}", parent_height);
+                                match database.get_metadata(height_key.as_bytes()) {
+                                    Ok(Some(bytes)) if bytes.len() >= 32 => {
+                                        let mut h = [0u8; 32];
+                                        h.copy_from_slice(&bytes[..32]);
+                                        H256::from(h)
+                                    }
+                                    _ => {
+                                        // Can't verify parent hash (e.g. syncing from genesis)
+                                        // Allow it but log a warning
+                                        warn!(
+                                            height = sync_block.height,
+                                            "Cannot verify parent hash — no parent block in DB"
+                                        );
+                                        block.header.parent_hash
+                                    }
+                                }
+                            } else {
+                                // Genesis block — parent hash should be NIL
+                                H256::NIL
+                            };
+
+                            if block.header.parent_hash != expected_parent {
+                                error!(
+                                    height = sync_block.height,
+                                    expected_parent = %expected_parent,
+                                    got_parent = %block.header.parent_hash,
+                                    "Synced block parent hash mismatch — rejecting block"
+                                );
+                                break;
+                            }
+
+                            // Remember this block's hash for the next iteration
+                            prev_block_hash = Some(block.hash());
 
                             // Execute and commit the block (reuses the same path as consensus)
                             match Self::execute_block(database, state_db, &block).await {

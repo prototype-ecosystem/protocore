@@ -664,7 +664,7 @@ impl NetworkService {
             return;
         }
 
-        info!(%source, topic = %message.topic, data_len = message.data.len(), "Received gossip message");
+        debug!(%source, topic = %message.topic, data_len = message.data.len(), "Received gossip message");
 
         // Decode the message
         let gossip_msg = match GossipMessage::decode(&message.data) {
