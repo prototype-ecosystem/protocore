@@ -51,6 +51,9 @@ futures = "0.3"
 # Time utilities
 instant = "0.1"
 
+# Cryptographic hashing (for GossipSub message IDs)
+sha2 = "0.10"
+
 # Random number generation (for peer selection)
 rand = "0.8"
 

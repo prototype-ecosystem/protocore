@@ -157,12 +157,17 @@ impl MultiDelegationSummary {
     }
 
     /// Add a delegation to the summary
-    pub fn add_delegation(&mut self, validator: Address, amount: u128, rewards: u128) {
+    pub fn add_delegation(&mut self, validator: Address, amount: u128, rewards: u128) -> Result<(), PrecompileError> {
         self.validators.push(validator);
         self.amounts.push(amount);
         self.rewards.push(rewards);
-        self.total_delegated += amount;
-        self.total_rewards += rewards;
+        self.total_delegated = self.total_delegated.checked_add(amount).ok_or_else(|| {
+            PrecompileError::InvalidInput("total_delegated overflow".into())
+        })?;
+        self.total_rewards = self.total_rewards.checked_add(rewards).ok_or_else(|| {
+            PrecompileError::InvalidInput("total_rewards overflow".into())
+        })?;
+        Ok(())
     }
 }
 
@@ -325,7 +330,9 @@ impl StakingPrecompile {
         };
 
         state.validators.insert(caller, validator);
-        state.total_stake += stake_amount;
+        state.total_stake = state.total_stake.checked_add(stake_amount).ok_or_else(|| {
+            PrecompileError::InvalidInput("total_stake overflow".into())
+        })?;
 
         // Save state
         Self::save_state(db, &state)?;
@@ -388,8 +395,12 @@ impl StakingPrecompile {
         }
 
         // Update validator stake
-        val.total_stake += amount;
-        state.total_stake += amount;
+        val.total_stake = val.total_stake.checked_add(amount).ok_or_else(|| {
+            PrecompileError::InvalidInput("validator total_stake overflow".into())
+        })?;
+        state.total_stake = state.total_stake.checked_add(amount).ok_or_else(|| {
+            PrecompileError::InvalidInput("total_stake overflow".into())
+        })?;
 
         // Update or create delegation record
         let delegator_delegations = state.delegations.entry(caller).or_default();
@@ -400,7 +411,9 @@ impl StakingPrecompile {
                 pending_rewards: 0,
                 last_reward_height: block_number,
             });
-        delegation.amount += amount;
+        delegation.amount = delegation.amount.checked_add(amount).ok_or_else(|| {
+            PrecompileError::InvalidInput("delegation amount overflow".into())
+        })?;
 
         Self::save_state(db, &state)?;
 
@@ -958,7 +971,7 @@ impl StakingPrecompile {
 
         if let Some(delegations) = state.delegations.get(&staker_addr) {
             for (validator, record) in delegations {
-                summary.add_delegation(*validator, record.amount, record.pending_rewards);
+                summary.add_delegation(*validator, record.amount, record.pending_rewards)?;
             }
         }
 

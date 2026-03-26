@@ -56,7 +56,7 @@ pub struct SchnorrSecretKey {
 impl Drop for SchnorrSecretKey {
     fn drop(&mut self) {
         // Zero out the scalar on drop for security
-        // The scalar will be overwritten when the memory is freed
+        self.scalar = Scalar::ZERO;
     }
 }
 
@@ -285,37 +285,26 @@ impl SchnorrSecretKey {
 impl SchnorrPublicKey {
     /// Create from 32-byte x-coordinate
     pub fn from_bytes(bytes: &[u8; 32]) -> Result<Self> {
-        // Construct compressed point with even y-coordinate assumption (BIP-340 style)
+        // BIP-340: public keys always use even y-coordinate
         let mut compressed = [0u8; 33];
-        compressed[0] = 0x02; // Even y
+        compressed[0] = 0x02; // Even y only
         compressed[1..].copy_from_slice(bytes);
 
         let encoded = k256::EncodedPoint::from_bytes(compressed)
             .map_err(|e| CryptoError::InvalidPublicKey(e.to_string()))?;
 
         let affine_opt = AffinePoint::from_encoded_point(&encoded);
-        let affine = if affine_opt.is_some().into() {
-            affine_opt.unwrap()
+        if affine_opt.is_some().into() {
+            let affine = affine_opt.unwrap();
+            Ok(Self {
+                point: ProjectivePoint::from(affine),
+                bytes: *bytes,
+            })
         } else {
-            // Try with odd y-coordinate
-            compressed[0] = 0x03;
-            let encoded = k256::EncodedPoint::from_bytes(compressed)
-                .map_err(|e| CryptoError::InvalidPublicKey(e.to_string()))?;
-
-            let affine_opt = AffinePoint::from_encoded_point(&encoded);
-            if affine_opt.is_some().into() {
-                affine_opt.unwrap()
-            } else {
-                return Err(CryptoError::InvalidPublicKey(
-                    "Invalid point encoding".to_string(),
-                ));
-            }
-        };
-
-        Ok(Self {
-            point: ProjectivePoint::from(affine),
-            bytes: *bytes,
-        })
+            Err(CryptoError::InvalidPublicKey(
+                "Invalid point encoding".to_string(),
+            ))
+        }
     }
 
     /// Get bytes representation
@@ -378,20 +367,10 @@ impl SchnorrPublicKey {
     }
 
     fn parse_r_point(r_bytes: &[u8; 32]) -> Option<ProjectivePoint> {
-        // Try even y first
         let mut compressed = [0u8; 33];
-        compressed[0] = 0x02;
+        compressed[0] = 0x02; // BIP-340: always even y
         compressed[1..].copy_from_slice(r_bytes);
 
-        let encoded = k256::EncodedPoint::from_bytes(compressed).ok()?;
-        let affine_opt = AffinePoint::from_encoded_point(&encoded);
-
-        if affine_opt.is_some().into() {
-            return Some(ProjectivePoint::from(affine_opt.unwrap()));
-        }
-
-        // Try odd y
-        compressed[0] = 0x03;
         let encoded = k256::EncodedPoint::from_bytes(compressed).ok()?;
         let affine_opt = AffinePoint::from_encoded_point(&encoded);
 
@@ -619,31 +598,37 @@ pub mod multisig {
     pub fn aggregate_signatures(
         partials: &[PartialSignature],
         combined_r: [u8; 32],
-    ) -> SchnorrSignature {
+    ) -> Result<SchnorrSignature> {
         let mut sum_s = Scalar::ZERO;
 
-        for partial in partials {
+        for (i, partial) in partials.iter().enumerate() {
             let s_opt = Scalar::from_repr(partial.s.into());
             if s_opt.is_some().into() {
                 sum_s += s_opt.unwrap();
+            } else {
+                return Err(CryptoError::InvalidSignature(
+                    format!("Invalid partial signature at index {}", i),
+                ));
             }
         }
 
-        SchnorrSignature {
+        Ok(SchnorrSignature {
             r: combined_r,
             s: sum_s.to_bytes().into(),
-        }
+        })
     }
 
     /// Combine nonce commitments from all signers
-    pub fn combine_nonces(commitments: &[[u8; 64]], message: &[u8]) -> [u8; 32] {
+    pub fn combine_nonces(commitments: &[[u8; 64]], message: &[u8]) -> Result<[u8; 32]> {
         // Sum all R1 and R2 points
         let mut sum_r1 = ProjectivePoint::IDENTITY;
         let mut sum_r2 = ProjectivePoint::IDENTITY;
 
-        for commit in commitments {
-            let r1 = parse_point_from_x(&commit[0..32]).unwrap_or(ProjectivePoint::IDENTITY);
-            let r2 = parse_point_from_x(&commit[32..64]).unwrap_or(ProjectivePoint::IDENTITY);
+        for (i, commit) in commitments.iter().enumerate() {
+            let r1 = parse_point_from_x(&commit[0..32])
+                .ok_or_else(|| CryptoError::InvalidPublicKey(format!("Invalid R1 nonce at index {}", i)))?;
+            let r2 = parse_point_from_x(&commit[32..64])
+                .ok_or_else(|| CryptoError::InvalidPublicKey(format!("Invalid R2 nonce at index {}", i)))?;
             sum_r1 += r1;
             sum_r2 += r2;
         }
@@ -665,12 +650,12 @@ pub mod multisig {
         let combined_r_affine = combined_r.to_affine();
         let combined_r_encoded = combined_r_affine.to_encoded_point(true);
 
-        combined_r_encoded
+        Ok(combined_r_encoded
             .x()
             .unwrap()
             .as_slice()
             .try_into()
-            .unwrap()
+            .unwrap())
     }
 
     fn parse_point_from_x(x_bytes: &[u8]) -> Option<ProjectivePoint> {
@@ -679,17 +664,9 @@ pub mod multisig {
         }
 
         let mut compressed = [0u8; 33];
-        compressed[0] = 0x02;
+        compressed[0] = 0x02; // BIP-340: even y only
         compressed[1..].copy_from_slice(x_bytes);
 
-        let encoded = k256::EncodedPoint::from_bytes(compressed).ok()?;
-        let affine_opt = AffinePoint::from_encoded_point(&encoded);
-
-        if affine_opt.is_some().into() {
-            return Some(ProjectivePoint::from(affine_opt.unwrap()));
-        }
-
-        compressed[0] = 0x03;
         let encoded = k256::EncodedPoint::from_bytes(compressed).ok()?;
         let affine_opt = AffinePoint::from_encoded_point(&encoded);
 

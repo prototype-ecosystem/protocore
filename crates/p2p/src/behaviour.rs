@@ -102,11 +102,12 @@ impl ProtocoreBehaviour {
             .flood_publish(true)
             // Message ID function based on content hash
             .message_id_fn(|msg| {
-                use std::hash::{Hash, Hasher};
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                msg.data.hash(&mut hasher);
-                msg.topic.hash(&mut hasher);
-                gossipsub::MessageId::from(hasher.finish().to_be_bytes().to_vec())
+                use sha2::{Sha256, Digest};
+                let mut hasher = Sha256::new();
+                hasher.update(&msg.data);
+                hasher.update(msg.topic.as_str().as_bytes());
+                let hash = hasher.finalize();
+                gossipsub::MessageId::from(hash.to_vec())
             })
             // Max message size (1 MB for blocks)
             .max_transmit_size(1024 * 1024)

@@ -177,14 +177,23 @@ pub fn parse_amount(s: &str) -> CliResult<u128> {
 
         // Calculate the fractional part relative to multiplier
         let frac_multiplier = multiplier / 10u128.pow(decimal_places as u32);
-        let frac_value = frac * frac_multiplier;
+        let frac_value = frac.checked_mul(frac_multiplier).ok_or_else(|| {
+            CliError::InvalidArgument(format!("Amount overflow: {}", s))
+        })?;
+        let whole_value = whole.checked_mul(multiplier).ok_or_else(|| {
+            CliError::InvalidArgument(format!("Amount overflow: {}", s))
+        })?;
 
-        Ok(whole * multiplier + frac_value)
+        Ok(whole_value.checked_add(frac_value).ok_or_else(|| {
+            CliError::InvalidArgument(format!("Amount overflow: {}", s))
+        })?)
     } else {
         let value: u128 = num_part
             .parse()
             .map_err(|_| CliError::InvalidArgument(format!("Invalid amount: {}", s)))?;
-        Ok(value * multiplier)
+        value.checked_mul(multiplier).ok_or_else(|| {
+            CliError::InvalidArgument(format!("Amount overflow: {}", s))
+        })
     }
 }
 

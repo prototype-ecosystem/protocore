@@ -222,6 +222,22 @@ async fn execute_generate(args: GenerateArgs, output_format: OutputFormat) -> Cl
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
+    // Check if output file already exists
+    if output_path.exists() {
+        let confirm = Confirm::new()
+            .with_prompt(format!(
+                "File {} already exists. Overwrite?",
+                output_path.display()
+            ))
+            .default(false)
+            .interact()?;
+
+        if !confirm {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
     let json = serde_json::to_string_pretty(&key_file)?;
     let mut file = fs::File::create(&output_path)?;
     file.write_all(json.as_bytes())?;

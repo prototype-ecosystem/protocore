@@ -246,11 +246,34 @@ impl ValidatorKeys {
         let key_array: [u8; 32] = key_bytes.try_into().map_err(|v: Vec<u8>| {
             anyhow::anyhow!("Expected 32 bytes for BLS key, got {}", v.len())
         })?;
-        let bls_private_key = BlsPrivateKey::from_bytes(&key_array)?;
+        let bls_private_key = BlsPrivateKey::from_bytes(&key_array)
+            .context("Invalid BLS private key bytes")?;
         let bls_public_key = bls_private_key.public_key();
 
-        let address =
-            Address::from_slice(&hex::decode(key_data.address.trim_start_matches("0x"))?)?;
+        // Validate BLS public key matches private key if present in file
+        if !key_data.bls_public_key.is_empty() {
+            let expected_pubkey_bytes = hex::decode(&key_data.bls_public_key)
+                .context("Invalid hex in bls_public_key field")?;
+            let actual_pubkey_bytes = bls_public_key.to_bytes();
+            if expected_pubkey_bytes != actual_pubkey_bytes {
+                anyhow::bail!(
+                    "BLS public key in key file does not match derived public key. \
+                     File may be corrupted or tampered with."
+                );
+            }
+        }
+
+        // Validate address is valid hex
+        let address_hex = key_data.address.trim_start_matches("0x");
+        if address_hex.len() != 40 {
+            anyhow::bail!(
+                "Invalid address length: expected 40 hex chars, got {}",
+                address_hex.len()
+            );
+        }
+        let address_bytes = hex::decode(address_hex)
+            .context("Invalid hex in address field")?;
+        let address = Address::from_slice(&address_bytes)?;
 
         Ok(Self {
             bls_private_key,
